@@ -18,6 +18,7 @@ class ArithExpression {
     public int numSum; // sum of all individuals non variable integers
     public int id1Count; // additive occurences of id1
     public int id2Count; // additive occurences of id2
+    
 
     public ArithExpression(){
         this.numSum = 0;
@@ -74,11 +75,23 @@ class ArithExpression {
 public class TPTP {
     private Set<String> stepNames=new HashSet<String>(); //store step names
     private String runStepName = null;
+
+    private static boolean nonSimple = false;
+    private static int lastNumeral = 0;
+    private static String currentID1 = null;
+    private static String currentID2 = null;
+    
     public static void main( String[] args ) throws ParseException {
         TPTP parser = new TPTP( System.in ) ;
         try{
             parser.Program(); 
             System.out.println("Success");
+            if(nonSimple){
+                System.out.println("Non-simple");
+            }
+            else{
+                System.out.println("Simple");
+            }
         }
         catch(ParseException e){
             System.out.println("Failure");
@@ -104,6 +117,9 @@ public class TPTP {
             System.err.println(e.getMessage());
         }
     }
+    private static void markNonSimple(){
+        nonSimple = true;
+    }  
 }
 PARSER_END(TPTP)
 
@@ -151,8 +167,8 @@ void Program():{}
 void pairID():{
     Token id1Tok;
     Token id2Tok;
-    string id1;
-    string id2;
+    String id1;
+    String id2;
 }{
     <LPAREN> id1Tok = <IDENTIFIER> <COMMA> id2Tok=<IDENTIFIER> <RPAREN>
     {
@@ -167,31 +183,41 @@ void Step():
     Token id1, id2;
     Token nextStep, elseStep;
     String cond;
-    String e1=null, e2=null, e3=null, e4=null;
+    ArithExpression e1=null, e2=null, e3=null, e4=null;
     boolean isSimple;
 }
 {
-    name = <IDENTIFIER> <COLON> <IF> cond=Cond()
+    name = <IDENTIFIER>
+    {
+        //COnd 8
+        if(stepNames.contains(name.image)){
+            throw new ParseException("Duplicate step name: " + name.image);
+        }
+        stepNames.add(name.image);
+    }
+    
+    <COLON> <IF> cond=Cond()
     // pairID()
     <LPAREN> id1 = <IDENTIFIER> <COMMA> id2=<IDENTIFIER> <RPAREN>
+    {
+        currentID1 = id1.image;
+        currentID2 = id2.image;
+        if (!cond.equals(currentID1) && !cond.equals(currentID2)) {
+            throw new ParseException("Condition identifier must be one of the parameters.");
+        }
+    }
     //optional long form
-    [<BECOMES> <LPAREN> e1=Expr() <COMMA> e2=Expr() <RPAREN> <AND>]
+    [<BECOMES> <LPAREN> e1=Expr(false) <COMMA> e2=Expr(false) <RPAREN> <AND>]
     nextStep=<IDENTIFIER>
     
     <ELSE>
 
     //optional Long form branch False
-    [<LPAREN> e3=Expr() <COMMA> e4=Expr() <RPAREN> <AND>]
+    [<LPAREN> e3=Expr(true) <COMMA> e4=Expr(true) <RPAREN> <AND>]
     elseStep=<IDENTIFIER>
     {
-        //COnd 8
-        if(stepNames.contains(name)){
-            throw new ParseException("Duplicate step name: " + name.image);
-        }
-        stepNames.add(name.image);
-
         // Further Condition 6: id1 and id2 must be different
-        if (id1.equals(id2)) {
+        if (id1.image.equals(id2.image)) {
             throw new ParseException("Parameter names must be different in step: " + name);
         }
     }
@@ -199,52 +225,114 @@ void Step():
 
 String Cond():{
     Token condIDTok;
-    String condID;
     Token numTok;
-    int numeral;
-    String output="";
+    String condID;
 }
 {
     
     condIDTok=<IDENTIFIER> <LT> numTok=<NUMERAL>
     { 
-        condID=condIDTok.image;
-        numeral=Integer.parseInt(numTok.image);
-        output=condID.toString()+"<"+String.valueOf(numeral);
-        return(output);
+        return condIDTok.image;
     }
 }
 
 void Run() :
 {
     Token StepName;
+    Token n1Token,n2Token;
 }
 {
-    <RUN> StepName=<IDENTIFIER> <LPAREN> <NUMERAL> <COMMA> <NUMERAL> <RPAREN>
+    <RUN> StepName=<IDENTIFIER> <LPAREN> n1Token=<NUMERAL> <COMMA> n2Token=<NUMERAL> <RPAREN>
     {
         runStepName = StepName.image;
     }
 }
 
-String Expr():{}
+ArithExpression Expr(boolean allowsNegatives):{
+    ArithExpression exp = new ArithExpression();
+    boolean termWasNumeral;
+}
 {
-    Term()((<PLUS>|<MINUS>) Term())*
+    Term(allowsNegatives,exp)
+    ( "+" Term(allowsNegatives,exp)
+
+    |
+    "-" termWasNumeral=Term(allowsNegatives, exp)
     {
-        return("hello sally");
+        //Rule s E1/E2 cannot have subtraction
+        if (!allowsNegatives){
+            markNonSimple();
+        }
+        //Rule p:
+        if(!termWasNumeral){
+            markNonSimple();
+        } else{
+            exp.numSum -= (2*lastNumeral); //double negate as added prevbiously
+        }
+
+    }
+    )*
+    {
+        return exp;
     }
 }
-void Term():{}
-{
-    Factor() ( <MULT> Factor())*
-}
-
-void Factor():{
-    //count num of identifiers and add them up
-
+boolean Term(boolean allowsNegatives, ArithExpression exp):{
+    boolean factorWasNumeral;
 }
 {
-    <NUMERAL>
-    | <IDENTIFIER>
-    | <LPAREN> Expr() <RPAREN>
+    factorWasNumeral=Factor(allowsNegatives,exp)
+    (
+        "*" Factor(allowsNegatives, exp)
+        {
+            //multiplication makes expression non positive
+            markNonSimple();
+        }
+    )*
+    {
+        return factorWasNumeral;
+    }
+    
+}
+
+boolean Factor(boolean allowsNegatives, ArithExpression exp):
+{
+    Token numeralToken;
+    Token idToken;
+    int numeral;
+    boolean isNumeral=false;
+    boolean factorWasNumeral;
+    ArithExpression nestedExp;
+}
+{
+    (
+        numeralToken = <NUMERAL>
+        {
+            isNumeral=true;
+            numeral=Integer.parseInt(numeralToken.image);
+            lastNumeral=numeral;
+            exp.numSum +=numeral;
+        }
+
+        |
+        idToken = <IDENTIFIER>
+        {
+            //must be ID1 or ID2
+            if(idToken.image.equals(currentID1)){
+                exp.id1Count++;
+            } else if (idToken.image.equals(currentID2)){
+                exp.id2Count++;
+            } else{
+                throw new ParseException("Identifier '" + idToken.image + "' is not a parameter in this step.");
+            }
+        }
+        |
+        <LPAREN> nestedExp=Expr(allowsNegatives) <RPAREN>
+        {
+            exp.merge(nestedExp);
+        }
+    )
+    {
+        return isNumeral;
+    }
 }
 
