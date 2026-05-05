@@ -3,6 +3,57 @@ options{
 }
 PARSER_BEGIN(TPTP)
 import java.util.*;
+import java.util.HashSet;
+
+class Robot {
+    public long X;
+    public long Y;
+
+    public Robot(){
+        this.X = 0;
+        this.Y = 0;
+    }
+}
+class ArithExpression {
+    public int numSum; // sum of all individuals non variable integers
+    public int id1Count; // additive occurences of id1
+    public int id2Count; // additive occurences of id2
+
+    public ArithExpression(){
+        this.numSum = 0;
+        this.id1Count = 0;
+        this.id2Count = 0;
+    }
+
+    //eval the value of this arithExpression with givens values of ID1,ID2
+    public int eval(int ID1, int ID2){
+        return numSum + (ID1 * id1Count) + (ID2 * id2Count);
+    }
+
+    //merge another ArithExpression with this one
+    public void merge(ArithExpression other){
+        this.numSum += other.numSum;
+        this.id1Count += other.id1Count;
+        this.id2Count += other.id2Count;
+    }
+    //S3 checker, for when x<d is false
+    // expr is smallest at x=d as x>=d. Set other ID to 0 and check non-neg
+    public boolean checkS3(boolean condUsesID1, int condThreshold){
+        int result, ID1, ID2;
+
+        if(condUsesID1){
+            ID1 = condThreshold;
+            ID2 = 0;
+        }else{
+            ID1 = 0;
+            ID2 = condThreshold;
+        }
+
+        result = eval(ID1, ID2);
+        return (result >= 0);
+    }
+}
+
 // class Expression{
 //     //types are of N-number, V-variable, + , - , *
 //     char type;
@@ -97,7 +148,19 @@ void Program():{}
         }
     }
 }
-
+void pairID():{
+    Token id1Tok;
+    Token id2Tok;
+    string id1;
+    string id2;
+}{
+    <LPAREN> id1Tok = <IDENTIFIER> <COMMA> id2Tok=<IDENTIFIER> <RPAREN>
+    {
+        id1=id1Tok.image;
+        id2=id2Tok.image;
+        // recordParameterPair(token.beginLine, id1, id2);
+    }
+}
 void Step():
 {
     Token name;
@@ -109,6 +172,7 @@ void Step():
 }
 {
     name = <IDENTIFIER> <COLON> <IF> cond=Cond()
+    // pairID()
     <LPAREN> id1 = <IDENTIFIER> <COMMA> id2=<IDENTIFIER> <RPAREN>
     //optional long form
     [<BECOMES> <LPAREN> e1=Expr() <COMMA> e2=Expr() <RPAREN> <AND>]
@@ -134,15 +198,20 @@ void Step():
 }
 
 String Cond():{
-    String condString="";
-    //set tokens
-    Token Id, Numeral;
+    Token condIDTok;
+    String condID;
+    Token numTok;
+    int numeral;
+    String output="";
 }
 {
-    Id=<IDENTIFIER> <LT> Numeral=<NUMERAL>
+    
+    condIDTok=<IDENTIFIER> <LT> numTok=<NUMERAL>
     { 
-        condString=Id.image.toString()+"<"+Numeral.image.toString();
-        return(condString);
+        condID=condIDTok.image;
+        numeral=Integer.parseInt(numTok.image);
+        output=condID.toString()+"<"+String.valueOf(numeral);
+        return(output);
     }
 }
 
@@ -156,6 +225,7 @@ void Run() :
         runStepName = StepName.image;
     }
 }
+
 String Expr():{}
 {
     Term()((<PLUS>|<MINUS>) Term())*
