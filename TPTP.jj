@@ -1,0 +1,180 @@
+options{
+    STATIC=false;
+}
+PARSER_BEGIN(TPTP)
+import java.util.*;
+// class Expression{
+//     //types are of N-number, V-variable, + , - , *
+//     char type;
+//     long val; //for type N
+//     String varName, // for V
+//     Expression left,right; //used in operators 
+//     Expression(long v) { this.type = 'N'; this.val = v; }//Number constructor
+    
+//     Expression(String name) { this.type = 'V'; this.varName = name; } // var constructor
+    
+//     Expression(char op, Expression l, Expression r) { // op constructor
+//         this.type = op; this.left = l; this.right = r;
+//     }
+// }
+// class Step{
+
+// }
+public class TPTP {
+    private Set<String> stepNames=new HashSet<String>(); //store step names
+    private String runStepName = null;
+    public static void main( String[] args ) throws ParseException {
+        TPTP parser = new TPTP( System.in ) ;
+        try{
+            parser.Program(); 
+            System.out.println("Success");
+        }
+        catch(ParseException e){
+            System.out.println("Failure");
+            System.err.println(e.currentToken.next.beginLine);
+            System.err.println("Syntax Error: " + e.getMessage());
+        }
+        catch(TokenMgrError e){
+            System.out.println("Failure");
+            String msg = e.getMessage();
+            int lineIndex = msg.indexOf("line ");
+            int commaIndex = msg.indexOf(",", lineIndex);
+
+            if (lineIndex != -1 && commaIndex != -1) {
+                String lineNumber = msg.substring(lineIndex + 5, commaIndex);
+                System.err.println(lineNumber);
+            } else {
+                System.err.println("Unknown line");
+            }
+        } 
+        catch (Exception e){
+            System.out.println("Failure");
+            System.err.println("0");
+            System.err.println(e.getMessage());
+        }
+    }
+}
+PARSER_END(TPTP)
+
+//Tokens stuff
+
+
+SKIP: {" " | "\n"|"\t"|"\r"} //skips
+
+//reserved keywords 
+TOKEN: {
+    <RUN: "run"> |
+    <IF: "if"> |
+    <BECOMES: "becomes"> |
+    <ELSE: "else"> | 
+    <AND: "and">
+}
+
+//punctuation
+TOKEN: {<COLON:":"> | <COMMA:","> | <LT:"<"> | <LPAREN:"("> | <RPAREN:")">|<SEMICOLON:";">}
+
+//arithmetic
+TOKEN: {<PLUS:"+"> | <MINUS:"-"> | <MULT:"*">}
+
+
+
+//arithmetic numbers
+TOKEN: {<NUMERAL: (["0"-"9"])+>|
+        <IDENTIFIER: <LETTER>(<LETTER> | ["0"-"9"] | "_")*> |
+        <LETTER: (["a"-"z"] | ["A"-"Z"])>
+}
+// unexpected symbols
+TOKEN: {<UNEXPECTED: ~[]>}
+
+void Program():{}
+{
+    (Step() <SEMICOLON>)+
+    Run()
+    <EOF>
+    {
+        if(!stepNames.contains(runStepName)){
+            throw new ParseException("Step '" + runStepName + "' mentioned in run instruction does not exist.");
+        }
+    }
+}
+
+void Step():
+{
+    Token name;
+    Token id1, id2;
+    Token nextStep, elseStep;
+    String cond;
+    String e1=null, e2=null, e3=null, e4=null;
+    boolean isSimple;
+}
+{
+    name = <IDENTIFIER> <COLON> <IF> cond=Cond()
+    <LPAREN> id1 = <IDENTIFIER> <COMMA> id2=<IDENTIFIER> <RPAREN>
+    //optional long form
+    [<BECOMES> <LPAREN> e1=Expr() <COMMA> e2=Expr() <RPAREN> <AND>]
+    nextStep=<IDENTIFIER>
+    
+    <ELSE>
+
+    //optional Long form branch False
+    [<LPAREN> e3=Expr() <COMMA> e4=Expr() <RPAREN> <AND>]
+    elseStep=<IDENTIFIER>
+    {
+        //COnd 8
+        if(stepNames.contains(name)){
+            throw new ParseException("Duplicate step name: " + name.image);
+        }
+        stepNames.add(name.image);
+
+        // Further Condition 6: id1 and id2 must be different
+        if (id1.equals(id2)) {
+            throw new ParseException("Parameter names must be different in step: " + name);
+        }
+    }
+}
+
+String Cond():{
+    String condString="";
+    //set tokens
+    Token Id, Numeral;
+}
+{
+    Id=<IDENTIFIER> <LT> Numeral=<NUMERAL>
+    { 
+        condString=Id.image.toString()+"<"+Numeral.image.toString();
+        return(condString);
+    }
+}
+
+void Run() :
+{
+    Token StepName;
+}
+{
+    <RUN> StepName=<IDENTIFIER> <LPAREN> <NUMERAL> <COMMA> <NUMERAL> <RPAREN>
+    {
+        runStepName = StepName.image;
+    }
+}
+String Expr():{}
+{
+    Term()((<PLUS>|<MINUS>) Term())*
+    {
+        return("hello sally");
+    }
+}
+void Term():{}
+{
+    Factor() ( <MULT> Factor())*
+}
+
+void Factor():{
+    //count num of identifiers and add them up
+
+}
+{
+    <NUMERAL>
+    | <IDENTIFIER>
+    | <LPAREN> Expr() <RPAREN>
+}
+

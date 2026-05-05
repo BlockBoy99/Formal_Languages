@@ -1,0 +1,41 @@
+options{
+    STATIC=false;
+}
+PARSER_BEGIN(Assignment)
+public class Assignment {
+    public static void main( String[] args ) throws ParseException {
+        Assignment parser = new Assignment( System.in ) ;
+        try{
+            parser.Start(); 
+            System.out.println("SUCCESS");
+        }
+        catch(ParseException e){
+            System.out.println("FAIL");
+            System.err.println(e.currentToken.next.beginLine);
+        }
+        catch(TokenMgrError e){
+            System.out.println("FAIL, token error");
+            String msg = e.getMessage();
+            int lineIndex = msg.indexOf("line ");
+            int commaIndex = msg.indexOf(",", lineIndex);
+
+            if (lineIndex != -1 && commaIndex != -1) {
+                String lineNumber = msg.substring(lineIndex + 5, commaIndex);
+                System.err.println(lineNumber);
+            } else {
+                System.err.println("Unknown line");
+            }
+        } 
+    }
+}
+PARSER_END(Assignment)
+
+
+void Start():{}
+{ (MatchedBraces() ("\n"|"\r")*)+ <EOF>
+}
+
+void MatchedBraces():{}
+{ "("[MatchedBraces()]")"
+    
+}
