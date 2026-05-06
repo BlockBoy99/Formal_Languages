@@ -107,9 +107,16 @@ public class TPTP {
                 System.err.println("1");
             }
             String msg=e.getMessage();
-            if(msg==null || msg.isEmpty()){
-                msg="Unexpected token: "+ (errorToken != null? errorToken.image: "unknown");
+             if (msg.contains("Was expecting") && msg.contains("<")) {
+                msg = "Condition must be in the form ID<NUM; found arithmetic or invalid expression.";
             }
+            else if (msg.contains("Encountered")){
+                msg = "Syntax error: unexpected token '" + errorToken.image + "'.";
+            }
+            // 
+            // if(msg==null || msg.isEmpty()){
+            //     msg="Unexpected token: "+ (errorToken != null? errorToken.image: "unknown");
+            // }
             System.err.println(msg);
             //
             //

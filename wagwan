@@ -1,3 +1,4 @@
-s1: if x<1 (x,y) s2 else s2;
-s2: if a<2 (a,b) becomes (1*a,b) and s1 else s1;
-run s1 (0,0)
+a1: if x+3<4 (x,y) becomes a3 else a2;
+a2: if run<2 (all, run) a1 else a2;;
+a1: if a0<5 in (a0; a1) becomes (0,1) else a2;
+run a0 (1,1)
