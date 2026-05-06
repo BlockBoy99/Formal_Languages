@@ -11,6 +11,24 @@ class Robot {
         this.Y = 0;
     }
 }
+class StepReference{
+    public String stepName;
+    public int lineNumber;
+
+    public StepReference(String name, int line){
+        this.stepName=name;
+        this.lineNumber=line;
+    }
+}
+class ConditionInfo{
+    public String identifier;  // which parameter (ID1 or ID2)
+    public int threshold;       // the NUM value
+
+    public ConditionInfo(String id, int thresh) {
+        this.identifier = id;
+        this.threshold = thresh;
+    }
+}
 class ArithExpression {
     public int numSum; // sum of all individuals non variable integers
     public int id1Count; // additive occurences of id1
@@ -52,31 +70,18 @@ class ArithExpression {
     }
 }
 
-// class Expression{
-//     //types are of N-number, V-variable, + , - , *
-//     char type;
-//     long val; //for type N
-//     String varName, // for V
-//     Expression left,right; //used in operators 
-//     Expression(long v) { this.type = 'N'; this.val = v; }//Number constructor
-
-//     Expression(String name) { this.type = 'V'; this.varName = name; } // var constructor
-
-//     Expression(char op, Expression l, Expression r) { // op constructor
-//         this.type = op; this.left = l; this.right = r;
-//     }
-// }
-// class Step{
-
-// }
 public class TPTP implements TPTPConstants {
     private Set<String> stepNames=new HashSet<String>(); //store step names
+    private Set<String> parameterNames=new HashSet<String>();
     private String runStepName = null;
+    private Map<String, StepReference> stepReferences = new HashMap<String,StepReference >(); //maps step names to their reference
 
     private static boolean nonSimple = false;
     private static int lastNumeral = 0;
     private static String currentID1 = null;
     private static String currentID2 = null;
+    private static String firstNonSimpleStep=null;
+    private static String currentStepName=null;
 
     public static void main( String[] args ) throws ParseException {
         TPTP parser = new TPTP( System.in ) ;
@@ -85,37 +90,66 @@ public class TPTP implements TPTPConstants {
             System.out.println("Success");
             if(nonSimple){
                 System.out.println("Non-simple");
-            }
-            else{
+                System.out.println("first non simple at step: "+firstNonSimpleStep);
+            }else{
                 System.out.println("Simple");
             }
         }
         catch(ParseException e){
             System.out.println("Failure");
-            System.err.println(e.currentToken.next.beginLine);
-            System.err.println("Syntax Error: " + e.getMessage());
+            Token errorToken = e.currentToken;//Get token where error
+            if(errorToken !=null){
+                System.err.println(errorToken.beginLine);
+            }else{
+                System.err.println("1");
+            }
+            String msg=e.getMessage();
+            if(msg==null || msg.isEmpty()){
+                msg="Unexpected token: "+ (errorToken != null? errorToken.image: "unknown");
+            }
+            System.err.println(msg);
+            //
+            //
         }
         catch(TokenMgrError e){
             System.out.println("Failure");
             String msg = e.getMessage();
             int lineIndex = msg.indexOf("line ");
             int commaIndex = msg.indexOf(",", lineIndex);
-
-            if (lineIndex != -1 && commaIndex != -1) {
-                String lineNumber = msg.substring(lineIndex + 5, commaIndex);
-                System.err.println(lineNumber);
-            } else {
-                System.err.println("Unknown line");
+            int lineNum = 1;
+            try {
+                int lineIdx = msg.indexOf("line ");
+                if (lineIdx != -1) {
+                    int commaIdx = msg.indexOf(",", lineIdx);
+                    if (commaIdx != -1) {
+                        lineNum = Integer.parseInt(msg.substring(lineIdx + 5, commaIdx).trim());
+                    }
+                }
+            } catch (Exception ex) {
+                lineNum = 1;
             }
+            System.err.println(lineNum);
+            System.err.println("Lexical error: " + msg);
+
+            // if (lineIndex != -1 && commaIndex != -1) {
+            //     String lineNumber = msg.substring(lineIndex + 5, commaIndex);
+            //     System.err.println(lineNumber);
+            // } else {
+            //     System.err.println("Unknown line");
+            // }
         }
         catch (Exception e){
             System.out.println("Failure");
-            System.err.println("0");
-            System.err.println(e.getMessage());
+            System.err.println("1");
+            System.err.println("Internal errro"+e.getMessage());
         }
     }
     private static void markNonSimple(){
-        nonSimple = true;
+        if(!nonSimple && currentStepName!=null){
+            firstNonSimpleStep=currentStepName; //records first step that caused to not be simple
+            nonSimple = true;
+        }
+
     }
 
   final public void Program() throws ParseException {
@@ -133,7 +167,19 @@ public class TPTP implements TPTPConstants {
       }
     }
     Run();
-    jj_consume_token(0);
+    switch ((jj_ntk==-1)?jj_ntk():jj_ntk) {
+    case 0:
+      jj_consume_token(0);
+      break;
+    case UNEXPECTED:
+      jj_consume_token(UNEXPECTED);
+        {if (true) throw new ParseException("Unexpected character: '" + token.image + "'");}
+      break;
+    default:
+      jj_la1[1] = jj_gen;
+      jj_consume_token(-1);
+      throw new ParseException();
+    }
         if(!stepNames.contains(runStepName)){
             {if (true) throw new ParseException("Step '" + runStepName + "' mentioned in run instruction does not exist.");}
         }
@@ -159,7 +205,7 @@ public class TPTP implements TPTPConstants {
     Token name;
     Token id1, id2;
     Token nextStep, elseStep;
-    String cond;
+    ConditionInfo cond;
     ArithExpression e1=null, e2=null, e3=null, e4=null;
     boolean isSimple;
     name = jj_consume_token(IDENTIFIER);
@@ -168,6 +214,7 @@ public class TPTP implements TPTPConstants {
             {if (true) throw new ParseException("Duplicate step name: " + name.image);}
         }
         stepNames.add(name.image);
+        currentStepName=name.image;
     jj_consume_token(COLON);
     jj_consume_token(IF);
     cond = Cond();
@@ -178,9 +225,23 @@ public class TPTP implements TPTPConstants {
     jj_consume_token(RPAREN);
         currentID1 = id1.image;
         currentID2 = id2.image;
-        if (!cond.equals(currentID1) && !cond.equals(currentID2)) {
-            {if (true) throw new ParseException("Condition identifier must be one of the parameters.");}
+        if (!cond.identifier.equals(id1.image) && !cond.identifier.equals(id2.image)) {
+            {if (true) throw new ParseException("Condition uses paramter: "+cond.identifier+" but must use parameter " + id1.image + " or " + id2.image);}
         }
+        if(stepNames.contains(id1.image)){
+            {if (true) throw new ParseException("Parameter name '" + id1.image
+            + "' conflicts with step name.");}
+        }
+        if (stepNames.contains(id2.image)) {
+            {if (true) throw new ParseException("Parameter name '" + id2.image
+                + "' conflicts with step name.");}
+        }
+         // Further Condition 6: id1 and id2 must be different
+        if (id1.image.equals(id2.image)) {
+            {if (true) throw new ParseException("Parameter names must be different in step: " + name);}
+        }
+        parameterNames.add(id1.image);
+        parameterNames.add(id2.image);
     switch ((jj_ntk==-1)?jj_ntk():jj_ntk) {
     case BECOMES:
       jj_consume_token(BECOMES);
@@ -192,10 +253,11 @@ public class TPTP implements TPTPConstants {
       jj_consume_token(AND);
       break;
     default:
-      jj_la1[1] = jj_gen;
+      jj_la1[2] = jj_gen;
       ;
     }
     nextStep = jj_consume_token(IDENTIFIER);
+        stepReferences.put(nextStep.image, new StepReference(nextStep.image, nextStep.beginLine));
     jj_consume_token(ELSE);
     switch ((jj_ntk==-1)?jj_ntk():jj_ntk) {
     case LPAREN:
@@ -207,24 +269,21 @@ public class TPTP implements TPTPConstants {
       jj_consume_token(AND);
       break;
     default:
-      jj_la1[2] = jj_gen;
+      jj_la1[3] = jj_gen;
       ;
     }
     elseStep = jj_consume_token(IDENTIFIER);
-        // Further Condition 6: id1 and id2 must be different
-        if (id1.image.equals(id2.image)) {
-            {if (true) throw new ParseException("Parameter names must be different in step: " + name);}
-        }
+        stepReferences.put(elseStep.image, new StepReference(elseStep.image, elseStep.beginLine));
   }
 
-  final public String Cond() throws ParseException {
+  final public ConditionInfo Cond() throws ParseException {
     Token condIDTok;
     Token numTok;
-    String condID;
     condIDTok = jj_consume_token(IDENTIFIER);
     jj_consume_token(LT);
     numTok = jj_consume_token(NUMERAL);
-        {if (true) return condIDTok.image;}
+        int num=Integer.parseInt(numTok.image);
+        {if (true) return new ConditionInfo(condIDTok.image,num);}
     throw new Error("Missing return statement in function");
   }
 
@@ -253,7 +312,7 @@ public class TPTP implements TPTPConstants {
         ;
         break;
       default:
-        jj_la1[3] = jj_gen;
+        jj_la1[4] = jj_gen;
         break label_2;
       }
       switch ((jj_ntk==-1)?jj_ntk():jj_ntk) {
@@ -276,7 +335,7 @@ public class TPTP implements TPTPConstants {
         }
         break;
       default:
-        jj_la1[4] = jj_gen;
+        jj_la1[5] = jj_gen;
         jj_consume_token(-1);
         throw new ParseException();
       }
@@ -295,7 +354,7 @@ public class TPTP implements TPTPConstants {
         ;
         break;
       default:
-        jj_la1[5] = jj_gen;
+        jj_la1[6] = jj_gen;
         break label_3;
       }
       jj_consume_token(MULT);
@@ -340,7 +399,7 @@ public class TPTP implements TPTPConstants {
             exp.merge(nestedExp);
       break;
     default:
-      jj_la1[6] = jj_gen;
+      jj_la1[7] = jj_gen;
       jj_consume_token(-1);
       throw new ParseException();
     }
@@ -357,13 +416,13 @@ public class TPTP implements TPTPConstants {
   public Token jj_nt;
   private int jj_ntk;
   private int jj_gen;
-  final private int[] jj_la1 = new int[7];
+  final private int[] jj_la1 = new int[8];
   static private int[] jj_la1_0;
   static {
       jj_la1_init_0();
    }
    private static void jj_la1_init_0() {
-      jj_la1_0 = new int[] {0x100000,0x80,0x2000,0x30000,0x30000,0x40000,0x182000,};
+      jj_la1_0 = new int[] {0x100000,0x400001,0x80,0x2000,0x30000,0x30000,0x40000,0x182000,};
    }
 
   /** Constructor with InputStream. */
@@ -377,7 +436,7 @@ public class TPTP implements TPTPConstants {
     token = new Token();
     jj_ntk = -1;
     jj_gen = 0;
-    for (int i = 0; i < 7; i++) jj_la1[i] = -1;
+    for (int i = 0; i < 8; i++) jj_la1[i] = -1;
   }
 
   /** Reinitialise. */
@@ -391,7 +450,7 @@ public class TPTP implements TPTPConstants {
     token = new Token();
     jj_ntk = -1;
     jj_gen = 0;
-    for (int i = 0; i < 7; i++) jj_la1[i] = -1;
+    for (int i = 0; i < 8; i++) jj_la1[i] = -1;
   }
 
   /** Constructor. */
@@ -401,7 +460,7 @@ public class TPTP implements TPTPConstants {
     token = new Token();
     jj_ntk = -1;
     jj_gen = 0;
-    for (int i = 0; i < 7; i++) jj_la1[i] = -1;
+    for (int i = 0; i < 8; i++) jj_la1[i] = -1;
   }
 
   /** Reinitialise. */
@@ -411,7 +470,7 @@ public class TPTP implements TPTPConstants {
     token = new Token();
     jj_ntk = -1;
     jj_gen = 0;
-    for (int i = 0; i < 7; i++) jj_la1[i] = -1;
+    for (int i = 0; i < 8; i++) jj_la1[i] = -1;
   }
 
   /** Constructor with generated Token Manager. */
@@ -420,7 +479,7 @@ public class TPTP implements TPTPConstants {
     token = new Token();
     jj_ntk = -1;
     jj_gen = 0;
-    for (int i = 0; i < 7; i++) jj_la1[i] = -1;
+    for (int i = 0; i < 8; i++) jj_la1[i] = -1;
   }
 
   /** Reinitialise. */
@@ -429,7 +488,7 @@ public class TPTP implements TPTPConstants {
     token = new Token();
     jj_ntk = -1;
     jj_gen = 0;
-    for (int i = 0; i < 7; i++) jj_la1[i] = -1;
+    for (int i = 0; i < 8; i++) jj_la1[i] = -1;
   }
 
   private Token jj_consume_token(int kind) throws ParseException {
@@ -485,7 +544,7 @@ public class TPTP implements TPTPConstants {
       la1tokens[jj_kind] = true;
       jj_kind = -1;
     }
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 8; i++) {
       if (jj_la1[i] == jj_gen) {
         for (int j = 0; j < 32; j++) {
           if ((jj_la1_0[i] & (1<<j)) != 0) {

@@ -14,6 +14,24 @@ class Robot {
         this.Y = 0;
     }
 }
+class StepReference{
+    public String stepName;
+    public int lineNumber;
+
+    public StepReference(String name, int line){
+        this.stepName=name;
+        this.lineNumber=line;
+    }
+}
+class ConditionInfo{
+    public String identifier;  // which parameter (ID1 or ID2)
+    public int threshold;       // the NUM value
+    
+    public ConditionInfo(String id, int thresh) {
+        this.identifier = id;
+        this.threshold = thresh;
+    }
+}
 class ArithExpression {
     public int numSum; // sum of all individuals non variable integers
     public int id1Count; // additive occurences of id1
@@ -55,31 +73,18 @@ class ArithExpression {
     }
 }
 
-// class Expression{
-//     //types are of N-number, V-variable, + , - , *
-//     char type;
-//     long val; //for type N
-//     String varName, // for V
-//     Expression left,right; //used in operators 
-//     Expression(long v) { this.type = 'N'; this.val = v; }//Number constructor
-    
-//     Expression(String name) { this.type = 'V'; this.varName = name; } // var constructor
-    
-//     Expression(char op, Expression l, Expression r) { // op constructor
-//         this.type = op; this.left = l; this.right = r;
-//     }
-// }
-// class Step{
-
-// }
 public class TPTP {
     private Set<String> stepNames=new HashSet<String>(); //store step names
+    private Set<String> parameterNames=new HashSet<String>();
     private String runStepName = null;
+    private Map<String, StepReference> stepReferences = new HashMap<String,StepReference >(); //maps step names to their reference
 
     private static boolean nonSimple = false;
     private static int lastNumeral = 0;
     private static String currentID1 = null;
     private static String currentID2 = null;
+    private static String firstNonSimpleStep=null;
+    private static String currentStepName=null;
     
     public static void main( String[] args ) throws ParseException {
         TPTP parser = new TPTP( System.in ) ;
@@ -88,37 +93,66 @@ public class TPTP {
             System.out.println("Success");
             if(nonSimple){
                 System.out.println("Non-simple");
-            }
-            else{
+                System.out.println("first non simple at step: "+firstNonSimpleStep);
+            }else{
                 System.out.println("Simple");
             }
         }
         catch(ParseException e){
             System.out.println("Failure");
-            System.err.println(e.currentToken.next.beginLine);
-            System.err.println("Syntax Error: " + e.getMessage());
+            Token errorToken = e.currentToken;//Get token where error
+            if(errorToken !=null){
+                System.err.println(errorToken.beginLine); 
+            }else{
+                System.err.println("1");
+            }
+            String msg=e.getMessage();
+            if(msg==null || msg.isEmpty()){
+                msg="Unexpected token: "+ (errorToken != null? errorToken.image: "unknown");
+            }
+            System.err.println(msg);
+            //
+            //
         }
         catch(TokenMgrError e){
             System.out.println("Failure");
             String msg = e.getMessage();
             int lineIndex = msg.indexOf("line ");
             int commaIndex = msg.indexOf(",", lineIndex);
-
-            if (lineIndex != -1 && commaIndex != -1) {
-                String lineNumber = msg.substring(lineIndex + 5, commaIndex);
-                System.err.println(lineNumber);
-            } else {
-                System.err.println("Unknown line");
+            int lineNum = 1;
+            try {
+                int lineIdx = msg.indexOf("line ");
+                if (lineIdx != -1) {
+                    int commaIdx = msg.indexOf(",", lineIdx);
+                    if (commaIdx != -1) {
+                        lineNum = Integer.parseInt(msg.substring(lineIdx + 5, commaIdx).trim());
+                    }
+                }
+            } catch (Exception ex) {
+                lineNum = 1;
             }
+            System.err.println(lineNum);
+            System.err.println("Lexical error: " + msg);
+    
+            // if (lineIndex != -1 && commaIndex != -1) {
+            //     String lineNumber = msg.substring(lineIndex + 5, commaIndex);
+            //     System.err.println(lineNumber);
+            // } else {
+            //     System.err.println("Unknown line");
+            // }
         } 
         catch (Exception e){
             System.out.println("Failure");
-            System.err.println("0");
-            System.err.println(e.getMessage());
+            System.err.println("1");
+            System.err.println("Internal errro"+e.getMessage());
         }
     }
     private static void markNonSimple(){
-        nonSimple = true;
+        if(!nonSimple && currentStepName!=null){
+            firstNonSimpleStep=currentStepName; //records first step that caused to not be simple
+            nonSimple = true;
+        }
+        
     }  
 }
 PARSER_END(TPTP)
@@ -157,7 +191,11 @@ void Program():{}
 {
     (Step() <SEMICOLON>)+
     Run()
-    <EOF>
+    ((<EOF>)| <UNEXPECTED>
+    {
+        throw new ParseException("Unexpected character: '" + token.image + "'");
+    }
+    )
     {
         if(!stepNames.contains(runStepName)){
             throw new ParseException("Step '" + runStepName + "' mentioned in run instruction does not exist.");
@@ -182,7 +220,7 @@ void Step():
     Token name;
     Token id1, id2;
     Token nextStep, elseStep;
-    String cond;
+    ConditionInfo cond;
     ArithExpression e1=null, e2=null, e3=null, e4=null;
     boolean isSimple;
 }
@@ -194,6 +232,7 @@ void Step():
             throw new ParseException("Duplicate step name: " + name.image);
         }
         stepNames.add(name.image);
+        currentStepName=name.image;
     }
     
     <COLON> <IF> cond=Cond()
@@ -202,37 +241,56 @@ void Step():
     {
         currentID1 = id1.image;
         currentID2 = id2.image;
-        if (!cond.equals(currentID1) && !cond.equals(currentID2)) {
-            throw new ParseException("Condition identifier must be one of the parameters.");
+        if (!cond.identifier.equals(id1.image) && !cond.identifier.equals(id2.image)) {
+            throw new ParseException("Condition uses paramter: "+cond.identifier+" but must use parameter " + id1.image + " or " + id2.image);
         }
-    }
-    //optional long form
-    [<BECOMES> <LPAREN> e1=Expr(false) <COMMA> e2=Expr(false) <RPAREN> <AND>]
-    nextStep=<IDENTIFIER>
-    
-    <ELSE>
-
-    //optional Long form branch False
-    [<LPAREN> e3=Expr(true) <COMMA> e4=Expr(true) <RPAREN> <AND>]
-    elseStep=<IDENTIFIER>
-    {
-        // Further Condition 6: id1 and id2 must be different
+        if(stepNames.contains(id1.image)){
+            throw new ParseException("Parameter name '" + id1.image 
+            + "' conflicts with step name.");
+        }
+        if (stepNames.contains(id2.image)) {
+            throw new ParseException("Parameter name '" + id2.image 
+                + "' conflicts with step name.");
+        }
+         // Further Condition 6: id1 and id2 must be different
         if (id1.image.equals(id2.image)) {
             throw new ParseException("Parameter names must be different in step: " + name);
         }
+        parameterNames.add(id1.image);
+        parameterNames.add(id2.image);
+
+    }
+    (
+    //optional long form
+        <BECOMES> <LPAREN> e1=Expr(false) <COMMA> e2=Expr(false) <RPAREN> <AND>
+    )?
+
+    nextStep=<IDENTIFIER>
+    {
+        stepReferences.put(nextStep.image, new StepReference(nextStep.image, nextStep.beginLine));
+    }
+    <ELSE>
+
+    //optional Long form branch False
+    (
+        <LPAREN> e3=Expr(true) <COMMA> e4=Expr(true) <RPAREN> <AND>
+    )?
+    elseStep=<IDENTIFIER>
+    {
+        stepReferences.put(elseStep.image, new StepReference(elseStep.image, elseStep.beginLine));
     }
 }
 
-String Cond():{
+ConditionInfo Cond():{
     Token condIDTok;
     Token numTok;
-    String condID;
 }
 {
     
     condIDTok=<IDENTIFIER> <LT> numTok=<NUMERAL>
     { 
-        return condIDTok.image;
+        int num=Integer.parseInt(numTok.image);
+        return new ConditionInfo(condIDTok.image,num);
     }
 }
 

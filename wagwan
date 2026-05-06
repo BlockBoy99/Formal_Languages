@@ -1,3 +1,3 @@
-L: if x<3 (x,y) becomes (y,x) and L
-else (x-3, y+3) and R;
-run L (0, 2)
+s1: if x<1 (x,y) s2 else s2;
+s2: if a<2 (a,b) becomes (1*a,b) and s1 else s1;
+run s1 (0,0)
