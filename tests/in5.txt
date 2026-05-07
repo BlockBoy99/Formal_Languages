@@ -1,0 +1,2 @@
+s: if (n<1) (n,m) becomes (0,1) and t else (1,0) and u;
+run s (1,1)

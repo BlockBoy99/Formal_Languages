@@ -1,0 +1,7 @@
+     Q: if n<2 (n,p) RET1 else (n,n) and parity;
+parity: if p<2 (n,p) pardec else (n, p-2) and parity;
+pardec: if r<1 (n,r) becomes (n,0) and even else (n,0) and odd;
+   odd: if x<100000 (x,y) becomes (3*x+1, y) and Q else OVERFLOW;
+  even: if a<2 (a,b) becomes (b,a) and Q else (a-2,b+1) and even;
+
+run Q (12,0)

@@ -1,0 +1,6 @@
+m3: if a < 1
+(a, b)
+    end
+else
+    (a - 1, b + 3) and m3 ;
+run m3 (10, 1)

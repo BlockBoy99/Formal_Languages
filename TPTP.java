@@ -2,37 +2,37 @@
 import java.util.*;
 import java.util.HashSet;
 
-class Robot {
-    public long X;
-    public long Y;
+// class Robot {
+//     public long X;
+//     public long Y;
 
-    public Robot(){
-        this.X = 0;
-        this.Y = 0;
-    }
-}
-class StepReference{
-    public String stepName;
-    public int lineNumber;
+//     public Robot(){
+//         this.X = 0;
+//         this.Y = 0;
+//     }
+//}
+// class StepReference{
+//     public String stepName;
+//     public int lineNumber;
 
-    public StepReference(String name, int line){
-        this.stepName=name;
-        this.lineNumber=line;
-    }
-}
+//     public StepReference(String name, int line){
+//         this.stepName=name;
+//         this.lineNumber=line;
+//     }
+// }
 class ConditionInfo{
     public String identifier;  // which parameter (ID1 or ID2)
-    public int threshold;       // the NUM value
+    public long threshold;       // the NUM value
 
-    public ConditionInfo(String id, int thresh) {
+    public ConditionInfo(String id, long thresh) {
         this.identifier = id;
         this.threshold = thresh;
     }
 }
 class ArithExpression {
-    public int numSum; // sum of all individuals non variable integers
-    public int id1Count; // additive occurences of id1
-    public int id2Count; // additive occurences of id2
+    public long numSum; // sum of all individuals non variable integers
+    public long id1Count; // additive occurences of id1
+    public long id2Count; // additive occurences of id2
 
 
     public ArithExpression(){
@@ -42,7 +42,7 @@ class ArithExpression {
     }
 
     //eval the value of this arithExpression with givens values of ID1,ID2
-    public int eval(int ID1, int ID2){
+    public long eval(long ID1, long ID2){
         return numSum + (ID1 * id1Count) + (ID2 * id2Count);
     }
 
@@ -54,8 +54,8 @@ class ArithExpression {
     }
     //S3 checker, for when x<d is false
     // expr is smallest at x=d as x>=d. Set other ID to 0 and check non-neg
-    public boolean checkS3(boolean condUsesID1, int condThreshold){
-        int result, ID1, ID2;
+    public boolean checkS3(boolean condUsesID1, long condThreshold){
+        long result, ID1, ID2;
 
         if(condUsesID1){
             ID1 = condThreshold;
@@ -69,15 +69,47 @@ class ArithExpression {
         return (result >= 0);
     }
 }
+class State {
+    String stepName;
+    long x, y;
+    boolean halted;
+
+    public State(String stepName, long x, long y) {
+        this.stepName = stepName;
+        this.x = x;
+        this.y = y;
+        this.halted = false;
+    }
+
+    public boolean equals(State other) {
+        if (this.halted && other.halted) return true;
+        return this.stepName.equals(other.stepName) && this.x == other.x && this.y == other.y && this.halted == other.halted;
+    }
+}
+class StepDef {
+    public String name;
+    public boolean condUsesID1;
+    public long condThreshold;
+    public ArithExpression e1, e2;
+    public String nextStepTrue;
+    public ArithExpression e3, e4;
+    public String nextStepFalse;
+}
 
 public class TPTP implements TPTPConstants {
-    private Set<String> stepNames=new HashSet<String>(); //store step names
-    private Set<String> parameterNames=new HashSet<String>();
-    private String runStepName = null;
-    private Map<String, StepReference> stepReferences = new HashMap<String,StepReference >(); //maps step names to their reference
+    private static Set<String> stepNames=new HashSet<String>(); //store step names
+    private static Set<String> parameterNames=new HashSet<String>();
+    //private static String runStepName = null;
+    private static Set<String> stepRefs = new HashSet<String>();
+    private static Map<String, StepDef> stepDefs = new HashMap<String, StepDef>();
+    //private static Map<String, StepReference> stepReferences = new HashMap<String,StepReference >(); //maps step names to their reference
+
+    private static String runStepName = null;
+    private static long runX = 0;
+    private static long runY = 0;
 
     private static boolean nonSimple = false;
-    private static int lastNumeral = 0;
+    private static long lastNumeral = 0;
     private static String currentID1 = null;
     private static String currentID2 = null;
     private static String firstNonSimpleStep=null;
@@ -153,9 +185,9 @@ public class TPTP implements TPTPConstants {
 
         String exp = expectedStr.toString().trim().replace(" ", ", ");
         if (exp.isEmpty()) {
-            return "custom Syntax error: unexpected token '" + encountered + "'.";
+            return "Syntax error: unexpected token '" + encountered + "'.";
         }
-        return "custom Syntax error: unexpected token '" + encountered + "'. Expected one of: " + exp + ".";
+        return "Syntax error: unexpected token '" + encountered + "'. Expected one of: " + exp + ".";
     }
 
     public static void main( String[] args ) throws ParseException {
@@ -168,28 +200,24 @@ public class TPTP implements TPTPConstants {
                 System.out.println(firstNonSimpleStep);
             }else{
                 System.out.println("Simple");
+                executeInterpreter();
             }
         }
         catch(ParseException e){
-            System.out.println("HERE WE ARE");
-
+            System.out.println("Failure");
             if (e.currentToken == null) {
-                 System.out.println("ALSO HERE");
                 // A custom ParseException where we prefix line number inside the message
                 String msg = e.getMessage();
                 if (msg != null && msg.contains("|")) {
-                     System.out.println("perchance");
                     int pipeIdx = msg.indexOf('|');
                     String lineStr = msg.substring(0, pipeIdx);
                     System.err.println(lineStr);
                     System.err.println(msg.substring(pipeIdx + 1));
                 } else {
-                    System.out.println("Indubitably");
                     System.err.println("1");
                     System.err.println(msg != null ? msg : "Unknown syntax error");
                 }
             } else {
-                System.out.println("NAH WE ARE HERE");
                 // An auto-generated JavaCC parse error - make our own
                 Token errorToken = e.currentToken.next;
                 if (errorToken != null) {
@@ -197,7 +225,7 @@ public class TPTP implements TPTPConstants {
                 } else {
                     System.err.println("1");
                 }
-                System.err.println("custom"+decodeMessage(e));
+                System.err.println(decodeMessage(e));
             }
         }
             // System.out.println("Failure");
@@ -253,7 +281,7 @@ public class TPTP implements TPTPConstants {
         catch (Exception e){
             System.out.println("Failure");
             System.err.println("1");
-            System.err.println("Internal error"+e.getMessage());
+            System.err.println("Internal error: "+e.getMessage());
         }
     }
     private static void markNonSimple(){
@@ -262,6 +290,80 @@ public class TPTP implements TPTPConstants {
             nonSimple = true;
         }
 
+    }
+    private static State getNextState(State current) {
+        StepDef def = stepDefs.get(current.stepName);
+        if (def == null) {
+            State next = new State(current.stepName, current.x, current.y);
+            next.halted = true;
+            return next;
+        }
+
+        long condVal = def.condUsesID1 ? current.x : current.y;
+        boolean condTrue = condVal < def.condThreshold;
+
+        ArithExpression ex1 = condTrue ? def.e1 : def.e3;
+        ArithExpression ex2 = condTrue ? def.e2 : def.e4;
+        String nextStep = condTrue ? def.nextStepTrue : def.nextStepFalse;
+
+        // Extra challenge loop accelerator to combat states "too big to enumerate"
+        if (nextStep.equals(current.stepName)) {
+            boolean xTrans = (ex1.id1Count == 1 && ex1.id2Count == 0);
+            boolean yTrans = (ex2.id1Count == 0 && ex2.id2Count == 1);
+            boolean xConst = (ex1.id1Count == 0 && ex1.id2Count == 0);
+            boolean yConst = (ex2.id1Count == 0 && ex2.id2Count == 0);
+
+            if ((xTrans || xConst) && (yTrans || yConst)) {
+                long dx = xTrans ? ex1.numSum : 0;
+                long dy = yTrans ? ex2.numSum : 0;
+
+                if (condTrue) {
+                    if (def.condUsesID1 && xTrans && dx > 0) {
+                        long steps = (def.condThreshold - current.x + dx - 1) / dx;
+                        if (steps > 0) return new State(nextStep, current.x + steps * dx, yTrans ? current.y + steps * dy : ex2.numSum);
+                    } else if (!def.condUsesID1 && yTrans && dy > 0) {
+                        long steps = (def.condThreshold - current.y + dy - 1) / dy;
+                        if (steps > 0) return new State(nextStep, xTrans ? current.x + steps * dx : ex1.numSum, current.y + steps * dy);
+                    }
+                } else {
+                    if (def.condUsesID1 && xTrans && dx < 0) {
+                        long steps = (current.x - def.condThreshold) / (-dx) + 1;
+                        if (steps > 0) return new State(nextStep, current.x + steps * dx, yTrans ? current.y + steps * dy : ex2.numSum);
+                    } else if (!def.condUsesID1 && yTrans && dy < 0) {
+                        long steps = (current.y - def.condThreshold) / (-dy) + 1;
+                        if (steps > 0) return new State(nextStep, xTrans ? current.x + steps * dx : ex1.numSum, current.y + steps * dy);
+                    }
+                }
+            }
+        }
+
+        // Standard step fallback
+        return new State(nextStep, ex1.eval(current.x, current.y), ex2.eval(current.x, current.y));
+    }
+    private static void executeInterpreter() {
+        State tortoise = new State(runStepName, runX, runY);
+        State hare = new State(runStepName, runX, runY);
+
+        // Explicit Cycle Detection algorithm handling memory efficient loop capturing 
+        while (true) {
+            hare = getNextState(hare);
+            if (hare.halted) {
+                System.out.println(hare.stepName + " " + hare.x + " " + hare.y);
+                return;
+            }
+            hare = getNextState(hare);
+            if (hare.halted) {
+                System.out.println(hare.stepName + " " + hare.x + " " + hare.y);
+                return;
+            }
+
+            tortoise = getNextState(tortoise);
+
+            if (hare.equals(tortoise)) {
+                System.out.println("Loop");
+                return;
+            }
+        }
     }
 
   final public void Program() throws ParseException {
@@ -321,6 +423,7 @@ public class TPTP implements TPTPConstants {
     ConditionInfo cond;
     ArithExpression e1=null, e2=null, e3=null, e4=null;
     boolean isSimple;
+    StepDef def = new StepDef();
     name = jj_consume_token(IDENTIFIER);
         //Cond 8
         if(stepNames.contains(name.image)){
@@ -332,6 +435,7 @@ public class TPTP implements TPTPConstants {
         }
         stepNames.add(name.image);
         currentStepName=name.image;
+        def.name = name.image;
     jj_consume_token(COLON);
     jj_consume_token(IF);
     cond = Cond();
@@ -360,6 +464,13 @@ public class TPTP implements TPTPConstants {
 
         parameterNames.add(id1.image);
         parameterNames.add(id2.image);
+
+        def.condUsesID1 = cond.identifier.equals(id1.image);
+        def.condThreshold = cond.threshold;
+        ArithExpression defaultE1 = new ArithExpression(); defaultE1.id1Count = 1;
+        ArithExpression defaultE2 = new ArithExpression(); defaultE2.id2Count = 1;
+        def.e1 = defaultE1; def.e2 = defaultE2;
+        def.e3 = defaultE1; def.e4 = defaultE2;
     switch ((jj_ntk==-1)?jj_ntk():jj_ntk) {
     case BECOMES:
       jj_consume_token(BECOMES);
@@ -369,13 +480,18 @@ public class TPTP implements TPTPConstants {
       e2 = Expr(false);
       jj_consume_token(RPAREN);
       jj_consume_token(AND);
+            def.e1 = e1;
+            def.e2 = e2;
       break;
     default:
       jj_la1[2] = jj_gen;
       ;
     }
     nextStep = jj_consume_token(IDENTIFIER);
-        stepReferences.put(nextStep.image, new StepReference(nextStep.image, nextStep.beginLine));
+        def.nextStepTrue = nextStep.image;
+        stepRefs.add(nextStep.image);
+        //stepReferences.put(nextStep.image, new StepReference(nextStep.image, nextStep.beginLine));
+
     jj_consume_token(ELSE);
     switch ((jj_ntk==-1)?jj_ntk():jj_ntk) {
     case LPAREN:
@@ -385,13 +501,17 @@ public class TPTP implements TPTPConstants {
       e4 = Expr(true);
       jj_consume_token(RPAREN);
       jj_consume_token(AND);
+            def.e3 = e3;
+            def.e4 = e4;
       break;
     default:
       jj_la1[3] = jj_gen;
       ;
     }
     elseStep = jj_consume_token(IDENTIFIER);
-        stepReferences.put(elseStep.image, new StepReference(elseStep.image, elseStep.beginLine));
+        def.nextStepFalse = elseStep.image;
+        stepRefs.add(elseStep.image);
+        //stepReferences.put(elseStep.image, new StepReference(elseStep.image, elseStep.beginLine));
         //S3 check
         boolean condUsesID1=cond.identifier.equals(currentID1);
         if(e3!=null){
@@ -404,6 +524,8 @@ public class TPTP implements TPTPConstants {
             markNonSimple();
             }
         }
+        stepDefs.put(name.image, def); // save info to stepDefs for interpreter to find
+
   }
 
   final public ConditionInfo Cond() throws ParseException {
@@ -412,7 +534,7 @@ public class TPTP implements TPTPConstants {
     condIDTok = jj_consume_token(IDENTIFIER);
     jj_consume_token(LT);
     numTok = jj_consume_token(NUMERAL);
-        int num=Integer.parseInt(numTok.image);
+        long num=Long.parseLong(numTok.image);
         {if (true) return new ConditionInfo(condIDTok.image,num);}
     throw new Error("Missing return statement in function");
   }
@@ -428,6 +550,8 @@ public class TPTP implements TPTPConstants {
     n2Token = jj_consume_token(NUMERAL);
     jj_consume_token(RPAREN);
         runStepName = StepName.image;
+        runX = Long.parseLong(n1Token.image);
+        runY = Long.parseLong(n2Token.image);
   }
 
   final public ArithExpression Expr(boolean allowsNegatives) throws ParseException {
@@ -499,7 +623,7 @@ public class TPTP implements TPTPConstants {
   final public boolean Factor(boolean allowsNegatives, ArithExpression exp) throws ParseException {
     Token numeralToken;
     Token idToken;
-    int numeral;
+    long numeral;
     boolean isNumeral=false;
     boolean factorWasNumeral;
     ArithExpression nestedExp;
@@ -507,7 +631,7 @@ public class TPTP implements TPTPConstants {
     case NUMERAL:
       numeralToken = jj_consume_token(NUMERAL);
             isNumeral=true;
-            numeral=Integer.parseInt(numeralToken.image);
+            numeral=Long.parseLong(numeralToken.image);
             lastNumeral=numeral;
             exp.numSum +=numeral;
       break;
