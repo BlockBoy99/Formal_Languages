@@ -9,41 +9,41 @@ public interface TPTPConstants {
   /** End of File. */
   int EOF = 0;
   /** RegularExpression Id. */
-  int RUN = 5;
+  int RUN = 4;
   /** RegularExpression Id. */
-  int IF = 6;
+  int IF = 5;
   /** RegularExpression Id. */
-  int BECOMES = 7;
+  int BECOMES = 6;
   /** RegularExpression Id. */
-  int ELSE = 8;
+  int ELSE = 7;
   /** RegularExpression Id. */
-  int AND = 9;
+  int AND = 8;
   /** RegularExpression Id. */
-  int COLON = 10;
+  int COLON = 9;
   /** RegularExpression Id. */
-  int COMMA = 11;
+  int COMMA = 10;
   /** RegularExpression Id. */
-  int LT = 12;
+  int LT = 11;
   /** RegularExpression Id. */
-  int LPAREN = 13;
+  int LPAREN = 12;
   /** RegularExpression Id. */
-  int RPAREN = 14;
+  int RPAREN = 13;
   /** RegularExpression Id. */
-  int SEMICOLON = 15;
+  int SEMICOLON = 14;
   /** RegularExpression Id. */
-  int PLUS = 16;
+  int PLUS = 15;
   /** RegularExpression Id. */
-  int MINUS = 17;
+  int MINUS = 16;
   /** RegularExpression Id. */
-  int MULT = 18;
+  int MULT = 17;
   /** RegularExpression Id. */
-  int NUMERAL = 19;
+  int NUMERAL = 18;
   /** RegularExpression Id. */
-  int IDENTIFIER = 20;
+  int IDENTIFIER = 19;
   /** RegularExpression Id. */
-  int LETTER = 21;
+  int LETTER = 20;
   /** RegularExpression Id. */
-  int UNEXPECTED = 22;
+  int UNEXPECTED = 21;
 
   /** Lexical state. */
   int DEFAULT = 0;
@@ -53,7 +53,6 @@ public interface TPTPConstants {
     "<EOF>",
     "\" \"",
     "\"\\n\"",
-    "\"\\t\"",
     "\"\\r\"",
     "\"run\"",
     "\"if\"",

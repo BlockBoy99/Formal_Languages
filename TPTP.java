@@ -83,6 +83,81 @@ public class TPTP implements TPTPConstants {
     private static String firstNonSimpleStep=null;
     private static String currentStepName=null;
 
+    private static String decodeMessage(ParseException e) {
+        if (e.currentToken == null) return e.getMessage();
+
+        Token current = e.currentToken;
+        Token next = current.next;
+        if (next == null) return e.getMessage();
+
+        String encountered = next.image;
+        if (encountered == null) encountered = "";
+        String currentImg = current.image;
+        if (currentImg == null) currentImg = "";
+
+        if (next.kind == 0) {
+            return "Unexpected end of file.";
+        }
+
+        // Determine what token types were expected
+        boolean expectsEOF = false;
+        boolean expectsLT = false;
+
+        if (e.expectedTokenSequences != null && tokenImage != null) {
+            for (int[] seq : e.expectedTokenSequences) {
+                for (int kind : seq) {
+                    if (kind >= 0 && kind < tokenImage.length) {
+                        String img = tokenImage[kind];
+                        if ("\"<\"".equals(img)) expectsLT = true;
+                        if ("<EOF>".equals(img)) expectsEOF = true;
+                    }
+                }
+            }
+        }
+
+        // Specific tailored messages based on typical TPTP violations
+        if (expectsEOF && ";".equals(encountered)) {
+            return "Unexpected semicolon after the run instruction.";
+        }
+
+        if (expectsLT && ("+".equals(encountered) || "-".equals(encountered) || "*".equals(encountered))) {
+            return "Condition is not of the form ID<NUM; encountered arithmetic operation.";
+        }
+
+        if ("if".equals(currentImg) && "(".equals(encountered)) {
+            return "Syntax error: expected an identifier after \"if\"; got \"(\".";
+        }
+
+        if (";".equals(encountered)) {
+             return "Unexpected semicolon.";
+        }
+
+        // Generic fallback combining the expected tokens cleanly
+        StringBuilder expectedStr = new StringBuilder();
+        if (e.expectedTokenSequences != null && tokenImage != null) {
+            for (int i = 0; i < e.expectedTokenSequences.length; i++) {
+                for (int j = 0; j < e.expectedTokenSequences[i].length; j++) {
+                    int kind = e.expectedTokenSequences[i][j];
+                    if (kind >= 0 && kind < tokenImage.length) {
+                        String exp = tokenImage[kind];
+                        if (exp.startsWith("\"") && exp.endsWith("\"")) {
+                            exp = exp.substring(1, exp.length() - 1);
+                        }
+                        if (expectedStr.indexOf(exp) == -1) {
+                            expectedStr.append(exp).append(" ");
+                        }
+                    }
+                }
+            }
+        }
+
+        String exp = expectedStr.toString().trim().replace(" ", ", ");
+        if (exp.isEmpty()) {
+            return "custom Syntax error: unexpected token '" + encountered + "'.";
+        }
+        return "custom Syntax error: unexpected token '" + encountered + "'. Expected one of: " + exp + ".";
+    }
+
     public static void main( String[] args ) throws ParseException {
         TPTP parser = new TPTP( System.in ) ;
         try{
@@ -90,34 +165,63 @@ public class TPTP implements TPTPConstants {
             System.out.println("Success");
             if(nonSimple){
                 System.out.println("Non-simple");
-                System.out.println("first non simple at step: "+firstNonSimpleStep);
+                System.out.println(firstNonSimpleStep);
             }else{
                 System.out.println("Simple");
             }
         }
         catch(ParseException e){
-            System.out.println("Failure");
-            Token errorToken = e.currentToken;//Get token where error
-            if(errorToken !=null){
-                System.err.println(errorToken.beginLine);
-            }else{
-                System.err.println("1");
+            System.out.println("HERE WE ARE");
+
+            if (e.currentToken == null) {
+                 System.out.println("ALSO HERE");
+                // A custom ParseException where we prefix line number inside the message
+                String msg = e.getMessage();
+                if (msg != null && msg.contains("|")) {
+                     System.out.println("perchance");
+                    int pipeIdx = msg.indexOf('|');
+                    String lineStr = msg.substring(0, pipeIdx);
+                    System.err.println(lineStr);
+                    System.err.println(msg.substring(pipeIdx + 1));
+                } else {
+                    System.out.println("Indubitably");
+                    System.err.println("1");
+                    System.err.println(msg != null ? msg : "Unknown syntax error");
+                }
+            } else {
+                System.out.println("NAH WE ARE HERE");
+                // An auto-generated JavaCC parse error - make our own
+                Token errorToken = e.currentToken.next;
+                if (errorToken != null) {
+                    System.err.println(errorToken.beginLine);
+                } else {
+                    System.err.println("1");
+                }
+                System.err.println("custom"+decodeMessage(e));
             }
-            String msg=e.getMessage();
-             if (msg.contains("Was expecting") && msg.contains("<")) {
-                msg = "Condition must be in the form ID<NUM; found arithmetic or invalid expression.";
-            }
-            else if (msg.contains("Encountered")){
-                msg = "Syntax error: unexpected token '" + errorToken.image + "'.";
-            }
-            // 
+        }
+            // System.out.println("Failure");
+            // Token errorToken = e.currentToken.next;//Get token where error
+            // if(errorToken !=null){
+            //     System.err.println(errorToken.beginLine); 
+            // }else{
+            //     System.err.println("1");
+            // }
+            // String msg=e.getMessage();
+            // // if (msg.contains("Was expecting") && msg.contains("<")) {
+            // //     msg = "Condition must be in the form ID<NUM; found arithmetic or invalid expression.";
+            // // }
+            // // else if (msg.contains("Encountered")){
+            // //     msg = "Syntax error: unexpected token '" + errorToken.image + "'.";
+            // // }
+
             // if(msg==null || msg.isEmpty()){
             //     msg="Unexpected token: "+ (errorToken != null? errorToken.image: "unknown");
+            // } else{
+            //     decodeMessage(msg)
             // }
-            System.err.println(msg);
-            //
-            //
-        }
+            // System.err.println(msg);
+
         catch(TokenMgrError e){
             System.out.println("Failure");
             String msg = e.getMessage();
@@ -144,11 +248,12 @@ public class TPTP implements TPTPConstants {
             // } else {
             //     System.err.println("Unknown line");
             // }
+
         }
         catch (Exception e){
             System.out.println("Failure");
             System.err.println("1");
-            System.err.println("Internal errro"+e.getMessage());
+            System.err.println("Internal error"+e.getMessage());
         }
     }
     private static void markNonSimple(){
@@ -187,8 +292,9 @@ public class TPTP implements TPTPConstants {
       jj_consume_token(-1);
       throw new ParseException();
     }
+        //cond 10 - step name in run must be present
         if(!stepNames.contains(runStepName)){
-            {if (true) throw new ParseException("Step '" + runStepName + "' mentioned in run instruction does not exist.");}
+            {if (true) throw new ParseException(token.beginLine+"|Step '" + runStepName + "' mentioned in run instruction does not exist.");}
         }
   }
 
@@ -216,9 +322,13 @@ public class TPTP implements TPTPConstants {
     ArithExpression e1=null, e2=null, e3=null, e4=null;
     boolean isSimple;
     name = jj_consume_token(IDENTIFIER);
-        //COnd 8
+        //Cond 8
         if(stepNames.contains(name.image)){
-            {if (true) throw new ParseException("Duplicate step name: " + name.image);}
+            {if (true) throw new ParseException(name.beginLine+"|Duplicate step name: " + name.image);}
+        }
+        //Cond 5: step name cannot be same as earlier param name // does not fully work
+        if(parameterNames.contains(name.image)){
+            {if (true) throw new ParseException(name.beginLine+"|Cannot have Step name '"+name.image+"' as already referenced as a parameter name");}
         }
         stepNames.add(name.image);
         currentStepName=name.image;
@@ -233,20 +343,21 @@ public class TPTP implements TPTPConstants {
         currentID1 = id1.image;
         currentID2 = id2.image;
         if (!cond.identifier.equals(id1.image) && !cond.identifier.equals(id2.image)) {
-            {if (true) throw new ParseException("Condition uses paramter: "+cond.identifier+" but must use parameter " + id1.image + " or " + id2.image);}
+            {if (true) throw new ParseException(id1.beginLine+"|Condition uses parameter: "+cond.identifier+" but must use parameter " + id1.image + " or " + id2.image);}
         }
         if(stepNames.contains(id1.image)){
-            {if (true) throw new ParseException("Parameter name '" + id1.image
+            {if (true) throw new ParseException(id1.beginLine+"|Parameter name '" + id1.image
             + "' conflicts with step name.");}
         }
         if (stepNames.contains(id2.image)) {
-            {if (true) throw new ParseException("Parameter name '" + id2.image
+            {if (true) throw new ParseException(id2.beginLine+"|Parameter name '" + id2.image
                 + "' conflicts with step name.");}
         }
          // Further Condition 6: id1 and id2 must be different
         if (id1.image.equals(id2.image)) {
-            {if (true) throw new ParseException("Parameter names must be different in step: " + name);}
+            {if (true) throw new ParseException(id2.beginLine+"|Parameter names must be different in step: " + name);}
         }
+
         parameterNames.add(id1.image);
         parameterNames.add(id2.image);
     switch ((jj_ntk==-1)?jj_ntk():jj_ntk) {
@@ -281,6 +392,18 @@ public class TPTP implements TPTPConstants {
     }
     elseStep = jj_consume_token(IDENTIFIER);
         stepReferences.put(elseStep.image, new StepReference(elseStep.image, elseStep.beginLine));
+        //S3 check
+        boolean condUsesID1=cond.identifier.equals(currentID1);
+        if(e3!=null){
+            if(!e3.checkS3(condUsesID1, cond.threshold)){
+            markNonSimple();
+            }
+        }
+        if(e4!=null){
+            if(!e4.checkS3(condUsesID1, cond.threshold)){
+            markNonSimple();
+            }
+        }
   }
 
   final public ConditionInfo Cond() throws ParseException {
@@ -330,7 +453,7 @@ public class TPTP implements TPTPConstants {
       case MINUS:
         jj_consume_token(MINUS);
         termWasNumeral = Term(allowsNegatives, exp);
-        //Rule s E1/E2 cannot have subtraction
+        //Rule s2 E1/E2 cannot have subtraction
         if (!allowsNegatives){
             markNonSimple();
         }
@@ -396,7 +519,7 @@ public class TPTP implements TPTPConstants {
             } else if (idToken.image.equals(currentID2)){
                 exp.id2Count++;
             } else{
-                {if (true) throw new ParseException("Identifier '" + idToken.image + "' is not a parameter in this step.");}
+                {if (true) throw new ParseException(idToken.beginLine+"|Identifier '" + idToken.image + "' is not a parameter in this step.");}
             }
       break;
     case LPAREN:
@@ -429,7 +552,7 @@ public class TPTP implements TPTPConstants {
       jj_la1_init_0();
    }
    private static void jj_la1_init_0() {
-      jj_la1_0 = new int[] {0x100000,0x400001,0x80,0x2000,0x30000,0x30000,0x40000,0x182000,};
+      jj_la1_0 = new int[] {0x80000,0x200001,0x40,0x1000,0x18000,0x18000,0x20000,0xc1000,};
    }
 
   /** Constructor with InputStream. */
@@ -546,7 +669,7 @@ public class TPTP implements TPTPConstants {
   /** Generate ParseException. */
   public ParseException generateParseException() {
     jj_expentries.clear();
-    boolean[] la1tokens = new boolean[23];
+    boolean[] la1tokens = new boolean[22];
     if (jj_kind >= 0) {
       la1tokens[jj_kind] = true;
       jj_kind = -1;
@@ -560,7 +683,7 @@ public class TPTP implements TPTPConstants {
         }
       }
     }
-    for (int i = 0; i < 23; i++) {
+    for (int i = 0; i < 22; i++) {
       if (la1tokens[i]) {
         jj_expentry = new int[1];
         jj_expentry[0] = i;
