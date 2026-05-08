@@ -2,24 +2,6 @@
 import java.util.*;
 import java.util.HashSet;
 
-// class Robot {
-//     public long X;
-//     public long Y;
-
-//     public Robot(){
-//         this.X = 0;
-//         this.Y = 0;
-//     }
-//}
-// class StepReference{
-//     public String stepName;
-//     public int lineNumber;
-
-//     public StepReference(String name, int line){
-//         this.stepName=name;
-//         this.lineNumber=line;
-//     }
-// }
 class ConditionInfo{
     public String identifier;  // which parameter (ID1 or ID2)
     public long threshold;       // the NUM value
@@ -30,9 +12,9 @@ class ConditionInfo{
     }
 }
 class ArithExpression {
-    public long numSum; // sum of all individuals non variable integers
-    public long id1Count; // additive occurences of id1
-    public long id2Count; // additive occurences of id2
+    public long numSum; // sum of all individual constant terms
+    public long id1Count; // coefficient of ID1
+    public long id2Count; // coefficient of ID2
 
 
     public ArithExpression(){
@@ -46,13 +28,13 @@ class ArithExpression {
         return numSum + (ID1 * id1Count) + (ID2 * id2Count);
     }
 
-    //merge another ArithExpression with this one
+    //merge another ArithExpression with this one - used for expressions like x+(1+y)
     public void merge(ArithExpression other){
         this.numSum += other.numSum;
         this.id1Count += other.id1Count;
         this.id2Count += other.id2Count;
     }
-    //S3 checker, for when x<d is false
+    //S3 checker, for when x<d is false - expression must be nonneg when cond is false
     // expr is smallest at x=d as x>=d. Set other ID to 0 and check non-neg
     public boolean checkS3(boolean condUsesID1, long condThreshold){
         long result, ID1, ID2;
@@ -98,13 +80,14 @@ class StepDef {
 
 public class TPTP implements TPTPConstants {
     private static Set<String> stepNames=new HashSet<String>(); //store step names
-    private static Set<String> parameterNames=new HashSet<String>();
-    //private static String runStepName = null;
+    private static Set<String> parameterNames=new HashSet<String>(); // stores param names
     private static Set<String> stepRefs = new HashSet<String>();
-    private static Map<String, StepDef> stepDefs = new HashMap<String, StepDef>();
-    //private static Map<String, StepReference> stepReferences = new HashMap<String,StepReference >(); //maps step names to their reference
+    private static Map<String, StepDef> stepDefs = new HashMap<String, StepDef>(); //used for interpreter
+
+     private static Set<String> stepReferencesAndNames = new HashSet<String>(); // tracks defined steps and referenced steps
 
     private static String runStepName = null;
+    private static int runStepLine = 1;
     private static long runX = 0;
     private static long runY = 0;
 
@@ -115,6 +98,34 @@ public class TPTP implements TPTPConstants {
     private static String firstNonSimpleStep=null;
     private static String currentStepName=null;
 
+    /**
+     * Checks condition 5: ensures step names aren't used as paramter names
+     * everytime a stpe name is defined or referenced, check wasn't already referenced
+     * @param name step name being mentioned
+     * @param line the line number in the instructions
+     * @throws ParseException if name already used as a parameter
+     */
+    private static void addStepMention(String name, int line) throws ParseException {
+        if (parameterNames.contains(name)) { //throw error is trying to mention a step that already a parameter
+            throw new ParseException(line + "|Identifier '" + name + "' is already used as a parameter and cannot be a step name.");
+        }
+        stepReferencesAndNames.add(name);
+    }
+
+    /**
+     * Checks Cond 5 bidirectional - ensure parameter identitifer aren't mentioned as a step name
+     * combines with addStepMention to allows forward and backward reference
+     * @param name the parameter identifier being mention
+     * @param line the line number in the instructions
+     * @throws ParseException if name already used as a step name or reference
+     */
+    private static void addParamMention(String name, int line) throws ParseException { //safely adds parameters
+        if (stepReferencesAndNames.contains(name)) { //if parameter defined that is mentioned as a step, throw error
+            throw new ParseException(line + "|Identifier '" + name + "' is already used as a step name/reference and cannot be a parameter.");
+        }
+        parameterNames.add(name);
+    }
+    // Attempts to create specific error messages by decoding expectedTokenSequences
     private static String decodeMessage(ParseException e) {
         if (e.currentToken == null) return e.getMessage();
 
@@ -131,9 +142,12 @@ public class TPTP implements TPTPConstants {
             return "Unexpected end of file.";
         }
 
-        // Determine what token types were expected
+        // check expected tokens
         boolean expectsEOF = false;
         boolean expectsLT = false;
+        boolean expectsIDENTIFIER = false;
+        boolean expectsSEMICOLON = false;
+        boolean expectsLPAREN = false;
 
         if (e.expectedTokenSequences != null && tokenImage != null) {
             for (int[] seq : e.expectedTokenSequences) {
@@ -142,29 +156,59 @@ public class TPTP implements TPTPConstants {
                         String img = tokenImage[kind];
                         if ("\"<\"".equals(img)) expectsLT = true;
                         if ("<EOF>".equals(img)) expectsEOF = true;
+                        if ("<IDENTIFIER>".equals(img)) expectsIDENTIFIER = true;
+                        if ("\";\"".equals(img)) expectsSEMICOLON = true;
+                        if ("\"(\"".equals(img)) expectsLPAREN = true;
                     }
                 }
             }
         }
 
-        // Specific tailored messages based on typical TPTP violations
+        // Pattern-match common mistakes
+
+        //No steps befoe run instruction
+        if (expectsIDENTIFIER && "run".equals(encountered)) {
+            return "Program must contain at least one step definition before the run instruction.";
+        }
+        //Missing semicolon after step definition
+        if (expectsSEMICOLON && "run".equals(encountered)) {
+            return "Expected semicolon after step definition.";
+        }
+        //SemiCOlon after run instruction
         if (expectsEOF && ";".equals(encountered)) {
             return "Unexpected semicolon after the run instruction.";
         }
 
+        //Ari
         if (expectsLT && ("+".equals(encountered) || "-".equals(encountered) || "*".equals(encountered))) {
-            return "Condition is not of the form ID<NUM; encountered arithmetic operation.";
+            return "Condition is not of the form ID<NUM; found arithmetic operation: '"+encountered+"''.";
         }
 
+        //parentheses surrounding condition
         if ("if".equals(currentImg) && "(".equals(encountered)) {
             return "Syntax error: expected an identifier after \"if\"; got \"(\".";
         }
 
+        //unexpected semicolon- generic
         if (";".equals(encountered)) {
              return "Unexpected semicolon.";
         }
 
-        // Generic fallback combining the expected tokens cleanly
+        //missing open paranthesis for parameters:
+        if (expectsLPAREN && !encountered.equals("(")) {
+            return "Expected opening parenthesis before parameter list, got '" + encountered + "'.";
+        }
+        // unexpected end of file during step definition
+        if (expectsSEMICOLON && next.kind == 0) {
+            return "Unexpected end of file. Expected semicolon after step definition.";
+        }
+
+        // no comma beteen paramters
+        if (expectsIDENTIFIER && ",".equals(currentImg) && !encountered.equals(",")) {
+            return "Expected comma separating parameters in step definition.";
+        }
+
+        // try and reconstruct a meaningful error
         StringBuilder expectedStr = new StringBuilder();
         if (e.expectedTokenSequences != null && tokenImage != null) {
             for (int i = 0; i < e.expectedTokenSequences.length; i++) {
@@ -228,28 +272,6 @@ public class TPTP implements TPTPConstants {
                 System.err.println(decodeMessage(e));
             }
         }
-            // System.out.println("Failure");
-            // Token errorToken = e.currentToken.next;//Get token where error
-            // if(errorToken !=null){
-            //     System.err.println(errorToken.beginLine); 
-            // }else{
-            //     System.err.println("1");
-            // }
-            // String msg=e.getMessage();
-            // // if (msg.contains("Was expecting") && msg.contains("<")) {
-            // //     msg = "Condition must be in the form ID<NUM; found arithmetic or invalid expression.";
-            // // }
-            // // else if (msg.contains("Encountered")){
-            // //     msg = "Syntax error: unexpected token '" + errorToken.image + "'.";
-            // // }
-
-            // if(msg==null || msg.isEmpty()){
-            //     msg="Unexpected token: "+ (errorToken != null? errorToken.image: "unknown");
-            // } else{
-            //     decodeMessage(msg)
-            // }
-            // System.err.println(msg);
-
         catch(TokenMgrError e){
             System.out.println("Failure");
             String msg = e.getMessage();
@@ -269,14 +291,6 @@ public class TPTP implements TPTPConstants {
             }
             System.err.println(lineNum);
             System.err.println("Lexical error: " + msg);
-
-            // if (lineIndex != -1 && commaIndex != -1) {
-            //     String lineNumber = msg.substring(lineIndex + 5, commaIndex);
-            //     System.err.println(lineNumber);
-            // } else {
-            //     System.err.println("Unknown line");
-            // }
-
         }
         catch (Exception e){
             System.out.println("Failure");
@@ -284,89 +298,162 @@ public class TPTP implements TPTPConstants {
             System.err.println("Internal error: "+e.getMessage());
         }
     }
+    //marks first step that is non simple
     private static void markNonSimple(){
         if(!nonSimple && currentStepName!=null){
-            firstNonSimpleStep=currentStepName; //records first step that caused to not be simple
+            firstNonSimpleStep=currentStepName;//records the first step that broke simplicity
             nonSimple = true;
         }
 
     }
+    // execute a step of robots movement
+    // Returns: new state with updated coordinates
     private static State getNextState(State current) {
+        if (current.x > 1000000000L || current.y > 1000000000L) {
+            // Halt and return a special state to trigger "Loop" output
+            State loopState = new State("LOOP_DETECTED", -1, -1);
+            loopState.halted = true;
+            return loopState;
+        }
         StepDef def = stepDefs.get(current.stepName);
         if (def == null) {
+            //Step doesn't exist halt at current pos
             State next = new State(current.stepName, current.x, current.y);
             next.halted = true;
             return next;
         }
 
+        //extract condval and check coordinate<threshold
         long condVal = def.condUsesID1 ? current.x : current.y;
         boolean condTrue = condVal < def.condThreshold;
 
+        //if cond true use e1,e2 and go NSTEP
+        //else go e3,e4 and go ESTEP
         ArithExpression ex1 = condTrue ? def.e1 : def.e3;
         ArithExpression ex2 = condTrue ? def.e2 : def.e4;
         String nextStep = condTrue ? def.nextStepTrue : def.nextStepFalse;
 
-        // Extra challenge loop accelerator to combat states "too big to enumerate"
-        if (nextStep.equals(current.stepName)) {
-            boolean xTrans = (ex1.id1Count == 1 && ex1.id2Count == 0);
-            boolean yTrans = (ex2.id1Count == 0 && ex2.id2Count == 1);
-            boolean xConst = (ex1.id1Count == 0 && ex1.id2Count == 0);
-            boolean yConst = (ex2.id1Count == 0 && ex2.id2Count == 0);
+        //Loop acceleration - took me a while
+        // if step loops to istelf, skip ahead nathematically
 
-            if ((xTrans || xConst) && (yTrans || yConst)) {
-                long dx = xTrans ? ex1.numSum : 0;
-                long dy = yTrans ? ex2.numSum : 0;
+        if (nextStep.equals(current.stepName)) {
+            //detec simple update patterns i.e x+constant or y+constant or constants like (x,constant)
+            boolean xIdentity = (ex1.id1Count == 1 && ex1.id2Count == 0); //x+c
+            boolean yIdentity = (ex2.id1Count == 0 && ex2.id2Count == 1); //y+c
+            boolean xConst = (ex1.id1Count == 0 && ex1.id2Count == 0); //constant in x
+            boolean yConst = (ex2.id1Count == 0 && ex2.id2Count == 0); // constant in y
+
+            //can only accelerate if each coordinate follows one of the paterns
+            boolean canAccelerate = (xIdentity || xConst) && (yIdentity || yConst);
+            if (canAccelerate) {
+                long dx = xIdentity ? ex1.numSum : 0;
+                long dy = yIdentity ? ex2.numSum : 0;
+
+                if (def.condUsesID1 && dx == 0) {
+                    // Condition checks x but x never changes
+                    //infinite loop
+                    State loopState = new State("LOOP_DETECTED", -1, -1);
+                    loopState.halted = true;
+                    return loopState;
+                }
+                if (!def.condUsesID1 && dy == 0) {
+                    // Condition checks y but y never changes
+                    //infinite loop
+                    State loopState = new State("LOOP_DETECTED", -1, -1);
+                    loopState.halted = true;
+                    return loopState;
+                }
 
                 if (condTrue) {
-                    if (def.condUsesID1 && xTrans && dx > 0) {
+                    //skip iterations until cond is false - calculate how many
+                    if (def.condUsesID1 && xIdentity && dx > 0) {
+                        //x inbcreasing, skip till x>=threshold
                         long steps = (def.condThreshold - current.x + dx - 1) / dx;
-                        if (steps > 0) return new State(nextStep, current.x + steps * dx, yTrans ? current.y + steps * dy : ex2.numSum);
-                    } else if (!def.condUsesID1 && yTrans && dy > 0) {
+
+                        if (steps > 0) {
+                            long newX = current.x + steps * dx;
+                            long newY = yIdentity ? current.y + steps * dy : ex2.numSum;
+                            return new State(nextStep,newX,newY);
+                        }
+                    } else if (!def.condUsesID1 && yIdentity && dy > 0) {
+                        //y increasing, skip till y>=threshold
                         long steps = (def.condThreshold - current.y + dy - 1) / dy;
-                        if (steps > 0) return new State(nextStep, xTrans ? current.x + steps * dx : ex1.numSum, current.y + steps * dy);
+                        if (steps > 0) {
+                            long newX = xIdentity ? current.x + steps * dx : ex1.numSum;
+                            long newY = current.y + steps * dy;
+                            return new State(nextStep, newX, newY);
+                        }
                     }
                 } else {
-                    if (def.condUsesID1 && xTrans && dx < 0) {
+                    //cond is false, skip until true
+                    if (def.condUsesID1 && xIdentity && dx < 0) {
+                        //x is decreasing, skip till x<threshold
                         long steps = (current.x - def.condThreshold) / (-dx) + 1;
-                        if (steps > 0) return new State(nextStep, current.x + steps * dx, yTrans ? current.y + steps * dy : ex2.numSum);
-                    } else if (!def.condUsesID1 && yTrans && dy < 0) {
+                        if (steps > 0) {
+                            long newX = current.x + steps * dx;
+                            long newY = yIdentity ? current.y + steps * dy : ex2.numSum;
+                            return new State(nextStep, newX, newY);
+                        }
+                    } else if (!def.condUsesID1 && yIdentity && dy < 0) {
+                        //y is decreasing, skip till y<threshold
                         long steps = (current.y - def.condThreshold) / (-dy) + 1;
-                        if (steps > 0) return new State(nextStep, xTrans ? current.x + steps * dx : ex1.numSum, current.y + steps * dy);
+                        if (steps > 0) {
+                            long newX = xIdentity ? current.x + steps * dx : ex1.numSum;
+                            long newY = current.y + steps * dy;
+                            return new State(nextStep, newX, newY);
+                        }
                     }
                 }
             }
         }
-
-        // Standard step fallback
+        // can't accelerate
+        // apply the arithexpressions and move to next step
         return new State(nextStep, ex1.eval(current.x, current.y), ex2.eval(current.x, current.y));
     }
     private static void executeInterpreter() {
         State tortoise = new State(runStepName, runX, runY);
         State hare = new State(runStepName, runX, runY);
 
-        // Explicit Cycle Detection algorithm handling memory efficient loop capturing 
+        // floyd cycle algorithm - hare and tortoise
+        // hare travels twice the speed of tortoise
+        // https://www.youtube.com/watch?v=S5TcPmTl6ww
         while (true) {
-            hare = getNextState(hare);
-            if (hare.halted) {
-                System.out.println(hare.stepName + " " + hare.x + " " + hare.y);
-                return;
-            }
-            hare = getNextState(hare);
-            if (hare.halted) {
-                System.out.println(hare.stepName + " " + hare.x + " " + hare.y);
-                return;
-            }
 
+            //move hare twice
+            hare = getNextState(hare);
+            if(hare.stepName.equals("LOOP_DETECTED")){
+                System.out.println("Loop");
+                return;
+
+            }
+            if (hare.halted) {
+                System.out.println(hare.stepName + " " + hare.x + " " + hare.y);
+                return;
+            }
+            hare = getNextState(hare);
+            if(hare.stepName.equals("LOOP_DETECTED")){
+                System.out.println("Loop");
+                return;
+
+            }
+            if (hare.halted) {
+                System.out.println(hare.stepName + " " + hare.x + " " + hare.y);
+                return;
+            }
+            //move tortoise once
             tortoise = getNextState(tortoise);
 
-            if (hare.equals(tortoise)) {
+            //if equal
+            if (hare.equals(tortoise)) { //loop detected
                 System.out.println("Loop");
                 return;
             }
         }
     }
 
+//Parse program
   final public void Program() throws ParseException {
+    Token t=null;
     label_1:
     while (true) {
       Step();
@@ -384,55 +471,39 @@ public class TPTP implements TPTPConstants {
     switch ((jj_ntk==-1)?jj_ntk():jj_ntk) {
     case 0:
       jj_consume_token(0);
+            //checks run Step is valid/exists
+            if(!stepNames.contains(runStepName)){
+                    {if (true) throw new ParseException(runStepLine+"|Step '" + runStepName + "' mentioned in run instruction does not exist.");}
+            }
       break;
     case UNEXPECTED:
-      jj_consume_token(UNEXPECTED);
-        {if (true) throw new ParseException("Unexpected character: '" + token.image + "'");}
+      t = jj_consume_token(UNEXPECTED);
+            //cond 10 - step name in run must be present
+            {if (true) throw new ParseException(t.beginLine+"|Unexpected character: '" + token.image + "'");}
       break;
     default:
       jj_la1[1] = jj_gen;
       jj_consume_token(-1);
       throw new ParseException();
     }
-        //cond 10 - step name in run must be present
-        if(!stepNames.contains(runStepName)){
-            {if (true) throw new ParseException(token.beginLine+"|Step '" + runStepName + "' mentioned in run instruction does not exist.");}
-        }
   }
 
-  final public void pairID() throws ParseException {
-    Token id1Tok;
-    Token id2Tok;
-    String id1;
-    String id2;
-    jj_consume_token(LPAREN);
-    id1Tok = jj_consume_token(IDENTIFIER);
-    jj_consume_token(COMMA);
-    id2Tok = jj_consume_token(IDENTIFIER);
-    jj_consume_token(RPAREN);
-        id1=id1Tok.image;
-        id2=id2Tok.image;
-        // recordParameterPair(token.beginLine, id1, id2);
-
-  }
-
+//Parses a step defintion of the form "STEP: if COND (ID1, ID2) [becomes (E1, E2) and] NSTEP else [(E3, E4) and] ESTEP"  
+// marks nom-simple steps and ensures arithmetic expression all follow positive-linear rules
   final public void Step() throws ParseException {
     Token name;
     Token id1, id2;
     Token nextStep, elseStep;
     ConditionInfo cond;
     ArithExpression e1=null, e2=null, e3=null, e4=null;
-    boolean isSimple;
     StepDef def = new StepDef();
     name = jj_consume_token(IDENTIFIER);
         //Cond 8
         if(stepNames.contains(name.image)){
             {if (true) throw new ParseException(name.beginLine+"|Duplicate step name: " + name.image);}
         }
-        //Cond 5: step name cannot be same as earlier param name // does not fully work
-        if(parameterNames.contains(name.image)){
-            {if (true) throw new ParseException(name.beginLine+"|Cannot have Step name '"+name.image+"' as already referenced as a parameter name");}
-        }
+        //Cond 5: step name cannot be same as earlier param name
+        addStepMention(name.image, name.beginLine);
         stepNames.add(name.image);
         currentStepName=name.image;
         def.name = name.image;
@@ -446,25 +517,22 @@ public class TPTP implements TPTPConstants {
     jj_consume_token(RPAREN);
         currentID1 = id1.image;
         currentID2 = id2.image;
-        if (!cond.identifier.equals(id1.image) && !cond.identifier.equals(id2.image)) {
-            {if (true) throw new ParseException(id1.beginLine+"|Condition uses parameter: "+cond.identifier+" but must use parameter " + id1.image + " or " + id2.image);}
-        }
-        if(stepNames.contains(id1.image)){
-            {if (true) throw new ParseException(id1.beginLine+"|Parameter name '" + id1.image
-            + "' conflicts with step name.");}
-        }
-        if (stepNames.contains(id2.image)) {
-            {if (true) throw new ParseException(id2.beginLine+"|Parameter name '" + id2.image
-                + "' conflicts with step name.");}
-        }
-         // Further Condition 6: id1 and id2 must be different
+        //Cond 5 bidirectional, check params against previous steps mentioned
+        addParamMention(id1.image, id1.beginLine);
+        addParamMention(id2.image, id2.beginLine);
+
+         // Further Condition 6: params id1 and id2 must be different
         if (id1.image.equals(id2.image)) {
             {if (true) throw new ParseException(id2.beginLine+"|Parameter names must be different in step: " + name);}
         }
+        //condition must use ID1 or ID2
+        if (!cond.identifier.equals(id1.image) && !cond.identifier.equals(id2.image)) {
+            {if (true) throw new ParseException(id1.beginLine+"|Condition uses parameter '" + cond.identifier
+                + "' but must use either '" + id1.image + "' or '" + id2.image + "'.");}
+        }
 
-        parameterNames.add(id1.image);
-        parameterNames.add(id2.image);
 
+        //sets defaults and is overriden if the clause "[becomes (E1, E2) and]" is added
         def.condUsesID1 = cond.identifier.equals(id1.image);
         def.condThreshold = cond.threshold;
         ArithExpression defaultE1 = new ArithExpression(); defaultE1.id1Count = 1;
@@ -489,9 +557,7 @@ public class TPTP implements TPTPConstants {
     }
     nextStep = jj_consume_token(IDENTIFIER);
         def.nextStepTrue = nextStep.image;
-        stepRefs.add(nextStep.image);
-        //stepReferences.put(nextStep.image, new StepReference(nextStep.image, nextStep.beginLine));
-
+        addStepMention(nextStep.image, nextStep.beginLine);
     jj_consume_token(ELSE);
     switch ((jj_ntk==-1)?jj_ntk():jj_ntk) {
     case LPAREN:
@@ -510,9 +576,8 @@ public class TPTP implements TPTPConstants {
     }
     elseStep = jj_consume_token(IDENTIFIER);
         def.nextStepFalse = elseStep.image;
-        stepRefs.add(elseStep.image);
-        //stepReferences.put(elseStep.image, new StepReference(elseStep.image, elseStep.beginLine));
-        //S3 check
+        addStepMention(elseStep.image, elseStep.beginLine);
+        //S3 check - when cond is false and make sure val>=0
         boolean condUsesID1=cond.identifier.equals(currentID1);
         if(e3!=null){
             if(!e3.checkS3(condUsesID1, cond.threshold)){
@@ -528,6 +593,7 @@ public class TPTP implements TPTPConstants {
 
   }
 
+//Parses conditions and returns class ConditionInfo
   final public ConditionInfo Cond() throws ParseException {
     Token condIDTok;
     Token numTok;
@@ -539,6 +605,7 @@ public class TPTP implements TPTPConstants {
     throw new Error("Missing return statement in function");
   }
 
+//Parses the run section
   final public void Run() throws ParseException {
     Token StepName;
     Token n1Token,n2Token;
@@ -550,10 +617,15 @@ public class TPTP implements TPTPConstants {
     n2Token = jj_consume_token(NUMERAL);
     jj_consume_token(RPAREN);
         runStepName = StepName.image;
+        runStepLine = StepName.beginLine;
+        //cond 10 - is validated in main
+        addStepMention(runStepName, runStepLine);
         runX = Long.parseLong(n1Token.image);
         runY = Long.parseLong(n2Token.image);
   }
 
+//Parse artihmetic expressions and returns ArithExpression
+// negatives allowed for false branch but not for tru
   final public ArithExpression Expr(boolean allowsNegatives) throws ParseException {
     ArithExpression exp = new ArithExpression();
     boolean termWasNumeral;
@@ -577,15 +649,14 @@ public class TPTP implements TPTPConstants {
       case MINUS:
         jj_consume_token(MINUS);
         termWasNumeral = Term(allowsNegatives, exp);
-        //Rule s2 E1/E2 cannot have subtraction
         if (!allowsNegatives){
-            markNonSimple();
+            markNonSimple(); // rule s2 -  E1/E2 cannot have subtraction
         }
-        //Rule p:
+        //Rule p2:
         if(!termWasNumeral){
-            markNonSimple();
+            markNonSimple(); //only allow subtraction of numerals
         } else{
-            exp.numSum -= (2*lastNumeral); //double negate as added prevbiously
+            exp.numSum -= (2*lastNumeral); //double negate as added previously - "undo addition"
         }
         break;
       default:
@@ -598,6 +669,7 @@ public class TPTP implements TPTPConstants {
     throw new Error("Missing return statement in function");
   }
 
+//Parses terms and returns boolean (factorWasNumeral) from Factor
   final public boolean Term(boolean allowsNegatives, ArithExpression exp) throws ParseException {
     boolean factorWasNumeral;
     factorWasNumeral = Factor(allowsNegatives,exp);
@@ -613,13 +685,14 @@ public class TPTP implements TPTPConstants {
       }
       jj_consume_token(MULT);
       Factor(allowsNegatives, exp);
-            //multiplication makes expression non positive
+            //rule s1: multiplication makes expression non positive
             markNonSimple();
     }
         {if (true) return factorWasNumeral;}
     throw new Error("Missing return statement in function");
   }
 
+//Parses factors - returns true if parsed factor is a numeral - validates rule s2
   final public boolean Factor(boolean allowsNegatives, ArithExpression exp) throws ParseException {
     Token numeralToken;
     Token idToken;
@@ -637,7 +710,7 @@ public class TPTP implements TPTPConstants {
       break;
     case IDENTIFIER:
       idToken = jj_consume_token(IDENTIFIER);
-            //must be ID1 or ID2
+            //check only ID1 or ID2 used in expressions
             if(idToken.image.equals(currentID1)){
                 exp.id1Count++;
             } else if (idToken.image.equals(currentID2)){
