@@ -79,24 +79,31 @@ class StepDef {
 }
 
 public class TPTP implements TPTPConstants {
+    //vars for steps
     private static Set<String> stepNames=new HashSet<String>(); //store step names
     private static Set<String> parameterNames=new HashSet<String>(); // stores param names
-    private static Set<String> stepRefs = new HashSet<String>();
     private static Map<String, StepDef> stepDefs = new HashMap<String, StepDef>(); //used for interpreter
+    private static Set<String> stepReferencesAndNames = new HashSet<String>(); // tracks defined steps and referenced steps
 
-     private static Set<String> stepReferencesAndNames = new HashSet<String>(); // tracks defined steps and referenced steps
-
+    //vars for runtime
     private static String runStepName = null;
     private static int runStepLine = 1;
     private static long runX = 0;
     private static long runY = 0;
 
-    private static boolean nonSimple = false;
+    //vars for parsing context
     private static long lastNumeral = 0;
     private static String currentID1 = null;
     private static String currentID2 = null;
-    private static String firstNonSimpleStep=null;
     private static String currentStepName=null;
+
+    //simplicity tracking
+    private static boolean nonSimple = false;
+    private static String firstNonSimpleStep=null;
+
+    //vars for loops
+    private static final long MAX_COORDINATE = 1000000000L;// max coordinate for interpreter
+    private static final String LOOP_DETECTED_STEP = "LOOP_DETECTED";
 
     /**
      * Checks condition 5: ensures step names aren't used as paramter names
@@ -125,7 +132,11 @@ public class TPTP implements TPTPConstants {
         }
         parameterNames.add(name);
     }
-    // Attempts to create specific error messages by decoding expectedTokenSequences
+    /**
+     * Attempts to create specific error messages by decoding expectedTokenSequences
+     * @param e ParseException thrown by parser
+     * @return custom error string to be outputed
+     */
     private static String decodeMessage(ParseException e) {
         if (e.currentToken == null) return e.getMessage();
 
@@ -179,7 +190,7 @@ public class TPTP implements TPTPConstants {
             return "Unexpected semicolon after the run instruction.";
         }
 
-        //Ari
+        //Arithmetric operation in condition - breaks rule of ID<NUM
         if (expectsLT && ("+".equals(encountered) || "-".equals(encountered) || "*".equals(encountered))) {
             return "Condition is not of the form ID<NUM; found arithmetic operation: '"+encountered+"''.";
         }
@@ -275,8 +286,6 @@ public class TPTP implements TPTPConstants {
         catch(TokenMgrError e){
             System.out.println("Failure");
             String msg = e.getMessage();
-            int lineIndex = msg.indexOf("line ");
-            int commaIndex = msg.indexOf(",", lineIndex);
             int lineNum = 1;
             try {
                 int lineIdx = msg.indexOf("line ");
@@ -298,7 +307,12 @@ public class TPTP implements TPTPConstants {
             System.err.println("Internal error: "+e.getMessage());
         }
     }
-    //marks first step that is non simple
+    //
+    /**
+     * Marks current step as non-simple - if not done before previously
+     * called by simplicity rules
+     * does nothing after first recording
+     */
     private static void markNonSimple(){
         if(!nonSimple && currentStepName!=null){
             firstNonSimpleStep=currentStepName;//records the first step that broke simplicity
@@ -306,12 +320,18 @@ public class TPTP implements TPTPConstants {
         }
 
     }
-    // execute a step of robots movement
-    // Returns: new state with updated coordinates
+    // 
+
+    /**
+     * execute a step of robots movement from current state by evaluating step condition and applying appropriate arith expression
+     * produces new coords and new step name
+     * @param current the current state of interpreter - step name, x and y coords
+     * @return next state after applying appropriate branch of Step cond
+     */
     private static State getNextState(State current) {
-        if (current.x > 1000000000L || current.y > 1000000000L) {
+        if (current.x > MAX_COORDINATE  || current.y > MAX_COORDINATE) { //check coords aren't bigger than max coords
             // Halt and return a special state to trigger "Loop" output
-            State loopState = new State("LOOP_DETECTED", -1, -1);
+            State loopState = new State(LOOP_DETECTED_STEP, -1, -1);
             loopState.halted = true;
             return loopState;
         }
@@ -337,7 +357,7 @@ public class TPTP implements TPTPConstants {
         // if step loops to istelf, skip ahead nathematically
 
         if (nextStep.equals(current.stepName)) {
-            //detec simple update patterns i.e x+constant or y+constant or constants like (x,constant)
+            //detect simple update patterns i.e x+constant or y+constant or constants like (x,constant)
             boolean xIdentity = (ex1.id1Count == 1 && ex1.id2Count == 0); //x+c
             boolean yIdentity = (ex2.id1Count == 0 && ex2.id2Count == 1); //y+c
             boolean xConst = (ex1.id1Count == 0 && ex1.id2Count == 0); //constant in x
@@ -352,22 +372,23 @@ public class TPTP implements TPTPConstants {
                 if (def.condUsesID1 && dx == 0) {
                     // Condition checks x but x never changes
                     //infinite loop
-                    State loopState = new State("LOOP_DETECTED", -1, -1);
+                    State loopState = new State(LOOP_DETECTED_STEP, -1, -1);
                     loopState.halted = true;
                     return loopState;
                 }
                 if (!def.condUsesID1 && dy == 0) {
                     // Condition checks y but y never changes
                     //infinite loop
-                    State loopState = new State("LOOP_DETECTED", -1, -1);
+                    State loopState = new State(LOOP_DETECTED_STEP, -1, -1);
                     loopState.halted = true;
                     return loopState;
                 }
 
                 if (condTrue) {
                     //skip iterations until cond is false - calculate how many
-                    if (def.condUsesID1 && xIdentity && dx > 0) {
-                        //x inbcreasing, skip till x>=threshold
+                    if (def.condUsesID1 && xIdentity && dx > 0) { //x inbcreasing, skip till x>=threshold
+
+                        //calculate how many steps until x>= threshold with ceil
                         long steps = (def.condThreshold - current.x + dx - 1) / dx;
 
                         if (steps > 0) {
@@ -375,8 +396,8 @@ public class TPTP implements TPTPConstants {
                             long newY = yIdentity ? current.y + steps * dy : ex2.numSum;
                             return new State(nextStep,newX,newY);
                         }
-                    } else if (!def.condUsesID1 && yIdentity && dy > 0) {
-                        //y increasing, skip till y>=threshold
+                    } else if (!def.condUsesID1 && yIdentity && dy > 0) { //y increasing, skip till y>=threshold
+                        //calculate how many steps until y>= threshold with ceil
                         long steps = (def.condThreshold - current.y + dy - 1) / dy;
                         if (steps > 0) {
                             long newX = xIdentity ? current.x + steps * dx : ex1.numSum;
@@ -386,16 +407,16 @@ public class TPTP implements TPTPConstants {
                     }
                 } else {
                     //cond is false, skip until true
-                    if (def.condUsesID1 && xIdentity && dx < 0) {
-                        //x is decreasing, skip till x<threshold
+                    if (def.condUsesID1 && xIdentity && dx < 0) { //x is decreasing, skip till x<threshold
+
                         long steps = (current.x - def.condThreshold) / (-dx) + 1;
                         if (steps > 0) {
                             long newX = current.x + steps * dx;
                             long newY = yIdentity ? current.y + steps * dy : ex2.numSum;
                             return new State(nextStep, newX, newY);
                         }
-                    } else if (!def.condUsesID1 && yIdentity && dy < 0) {
-                        //y is decreasing, skip till y<threshold
+                    } else if (!def.condUsesID1 && yIdentity && dy < 0) { //y is decreasing, skip till y<threshold
+
                         long steps = (current.y - def.condThreshold) / (-dy) + 1;
                         if (steps > 0) {
                             long newX = xIdentity ? current.x + steps * dx : ex1.numSum;
@@ -410,18 +431,22 @@ public class TPTP implements TPTPConstants {
         // apply the arithexpressions and move to next step
         return new State(nextStep, ex1.eval(current.x, current.y), ex2.eval(current.x, current.y));
     }
+    /**
+     * Runs interpeter with Floyd Cycle-detection alg - hare and tortoise
+     * hare travels twice the speed of tortoise per iteration
+     * if equal states occupied, cycle detected
+     * if either reaches halt state, print required info of final step name and coordinates of hare/tortois
+     * See reference below for idea
+     */
     private static void executeInterpreter() {
         State tortoise = new State(runStepName, runX, runY);
         State hare = new State(runStepName, runX, runY);
-
-        // floyd cycle algorithm - hare and tortoise
-        // hare travels twice the speed of tortoise
         // https://www.youtube.com/watch?v=S5TcPmTl6ww
         while (true) {
 
             //move hare twice
             hare = getNextState(hare);
-            if(hare.stepName.equals("LOOP_DETECTED")){
+            if(hare.stepName.equals(LOOP_DETECTED_STEP)){
                 System.out.println("Loop");
                 return;
 
@@ -431,7 +456,7 @@ public class TPTP implements TPTPConstants {
                 return;
             }
             hare = getNextState(hare);
-            if(hare.stepName.equals("LOOP_DETECTED")){
+            if(hare.stepName.equals(LOOP_DETECTED_STEP)){
                 System.out.println("Loop");
                 return;
 
@@ -451,7 +476,10 @@ public class TPTP implements TPTPConstants {
         }
     }
 
-//Parse program
+/**
+ * Parse program
+ * Checks Cond 10 and that run step is valid/exists
+ */
   final public void Program() throws ParseException {
     Token t=null;
     label_1:
@@ -488,8 +516,13 @@ public class TPTP implements TPTPConstants {
     }
   }
 
-//Parses a step defintion of the form "STEP: if COND (ID1, ID2) [becomes (E1, E2) and] NSTEP else [(E3, E4) and] ESTEP"  
-// marks nom-simple steps and ensures arithmetic expression all follow positive-linear rules
+/**
+ * Parses a step defintion of the form:
+ *  "STEP: if COND (ID1, ID2) [becomes (E1, E2) and] NSTEP else [(E3, E4) and] ESTEP"  
+ * ensures arithmetic expression all follow positive-linear rules
+ * Checks cond 5,6 and 8
+ * Evaluates s3 simplicity in elseStep for interpreter
+ */
   final public void Step() throws ParseException {
     Token name;
     Token id1, id2;
@@ -593,7 +626,10 @@ public class TPTP implements TPTPConstants {
 
   }
 
-//Parses conditions and returns class ConditionInfo
+/**
+ * Parses conditions of the form ID<NUM
+ * @return ConditionInfo with threshold val and param name
+ */
   final public ConditionInfo Cond() throws ParseException {
     Token condIDTok;
     Token numTok;
@@ -605,7 +641,10 @@ public class TPTP implements TPTPConstants {
     throw new Error("Missing return statement in function");
   }
 
-//Parses the run section
+//
+/** Parses the run section
+ * Records starting stepname, intial x and y coords for interpreter
+ */
   final public void Run() throws ParseException {
     Token StepName;
     Token n1Token,n2Token;
@@ -624,8 +663,11 @@ public class TPTP implements TPTPConstants {
         runY = Long.parseLong(n2Token.image);
   }
 
-//Parse artihmetic expressions and returns ArithExpression
-// negatives allowed for false branch but not for tru
+/**
+ * Parser for artihmetic expressions
+ * @param allowsNegatives - true when parsing false-branch, false when parsing true-branched (subtraction means nonsimple)
+ * @return complete ArithExpression for the expression
+ */
   final public ArithExpression Expr(boolean allowsNegatives) throws ParseException {
     ArithExpression exp = new ArithExpression();
     boolean termWasNumeral;
@@ -669,7 +711,12 @@ public class TPTP implements TPTPConstants {
     throw new Error("Missing return statement in function");
   }
 
-//Parses terms and returns boolean (factorWasNumeral) from Factor
+/**
+ * Parses terms and includes multiplication
+ * @param allowsNegatives passed to Factor
+ * @param exp the ArithExpression being built
+ * @return true if every factor is a numeral (got from Factor)
+ */
   final public boolean Term(boolean allowsNegatives, ArithExpression exp) throws ParseException {
     boolean factorWasNumeral;
     factorWasNumeral = Factor(allowsNegatives,exp);
@@ -692,7 +739,14 @@ public class TPTP implements TPTPConstants {
     throw new Error("Missing return statement in function");
   }
 
-//Parses factors - returns true if parsed factor is a numeral - validates rule s2
+//Parses factors - 
+/**
+ * Parser for a single factor: numeral, parameter identifier, of a sub-expr with parentheses
+ * @param allowsNegatives - can be passed to an expr being built
+ * @param exp the ArithExpression being built
+ * @return true if parsed factor is a numeral - false if indentifer or pexpr in parentheses
+ * @throws ParseException if undeclared identifier used
+ */
   final public boolean Factor(boolean allowsNegatives, ArithExpression exp) throws ParseException {
     Token numeralToken;
     Token idToken;

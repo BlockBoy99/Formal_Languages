@@ -108,6 +108,7 @@ public class TPTP {
     //vars for loops
     private static final long MAX_COORDINATE = 1000000000L;// max coordinate for interpreter
     private static final String LOOP_DETECTED_STEP = "LOOP_DETECTED";
+    
     /**
      * Checks condition 5: ensures step names aren't used as paramter names
      * everytime a stpe name is defined or referenced, check wasn't already referenced
@@ -135,7 +136,11 @@ public class TPTP {
         }
         parameterNames.add(name);
     }
-    // Attempts to create specific error messages by decoding expectedTokenSequences
+    /**
+     * Attempts to create specific error messages by decoding expectedTokenSequences
+     * @param e ParseException thrown by parser
+     * @return custom error string to be outputed
+     */
     private static String decodeMessage(ParseException e) {
         if (e.currentToken == null) return e.getMessage();
         
@@ -285,8 +290,6 @@ public class TPTP {
         catch(TokenMgrError e){
             System.out.println("Failure");
             String msg = e.getMessage();
-            int lineIndex = msg.indexOf("line ");
-            int commaIndex = msg.indexOf(",", lineIndex);
             int lineNum = 1;
             try {
                 int lineIdx = msg.indexOf("line ");
@@ -308,7 +311,12 @@ public class TPTP {
             System.err.println("Internal error: "+e.getMessage());
         }
     }
-    //marks first step that is non simple
+    //
+    /**
+     * Marks current step as non-simple - if not done before previously
+     * called by simplicity rules
+     * does nothing after first recording
+     */
     private static void markNonSimple(){
         if(!nonSimple && currentStepName!=null){
             firstNonSimpleStep=currentStepName;//records the first step that broke simplicity
@@ -316,8 +324,14 @@ public class TPTP {
         }
         
     }  
-    // execute a step of robots movement
-    // Returns: new state with updated coordinates
+    // 
+
+    /**
+     * execute a step of robots movement from current state by evaluating step condition and applying appropriate arith expression
+     * produces new coords and new step name
+     * @param current the current state of interpreter - step name, x and y coords
+     * @return next state after applying appropriate branch of Step cond
+     */
     private static State getNextState(State current) {
         if (current.x > MAX_COORDINATE  || current.y > MAX_COORDINATE) { //check coords aren't bigger than max coords
             // Halt and return a special state to trigger "Loop" output
@@ -347,7 +361,7 @@ public class TPTP {
         // if step loops to istelf, skip ahead nathematically
 
         if (nextStep.equals(current.stepName)) {
-            //detec simple update patterns i.e x+constant or y+constant or constants like (x,constant)
+            //detect simple update patterns i.e x+constant or y+constant or constants like (x,constant)
             boolean xIdentity = (ex1.id1Count == 1 && ex1.id2Count == 0); //x+c
             boolean yIdentity = (ex2.id1Count == 0 && ex2.id2Count == 1); //y+c
             boolean xConst = (ex1.id1Count == 0 && ex1.id2Count == 0); //constant in x
@@ -421,12 +435,16 @@ public class TPTP {
         // apply the arithexpressions and move to next step
         return new State(nextStep, ex1.eval(current.x, current.y), ex2.eval(current.x, current.y));
     }
+    /**
+     * Runs interpeter with Floyd Cycle-detection alg - hare and tortoise
+     * hare travels twice the speed of tortoise per iteration
+     * if equal states occupied, cycle detected
+     * if either reaches halt state, print required info of final step name and coordinates of hare/tortois
+     * See reference below for idea
+     */
     private static void executeInterpreter() {
         State tortoise = new State(runStepName, runX, runY);
         State hare = new State(runStepName, runX, runY);
-
-        // floyd cycle algorithm - hare and tortoise
-        // hare travels twice the speed of tortoise
         // https://www.youtube.com/watch?v=S5TcPmTl6ww
         while (true) {
             
@@ -495,7 +513,10 @@ TOKEN: {<NUMERAL: (["0"-"9"])+>|
 TOKEN: {<UNEXPECTED: ~[]>}
 
 
-//Parse program
+/**
+ * Parse program
+ * Checks Cond 10 and that run step is valid/exists
+ */
 void Program():{
     Token t=null; //for unexpected
 }
@@ -518,8 +539,13 @@ void Program():{
     )       
             
 }
-//Parses a step defintion of the form "STEP: if COND (ID1, ID2) [becomes (E1, E2) and] NSTEP else [(E3, E4) and] ESTEP"  
-// marks nom-simple steps and ensures arithmetic expression all follow positive-linear rules
+/**
+ * Parses a step defintion of the form:
+ *  "STEP: if COND (ID1, ID2) [becomes (E1, E2) and] NSTEP else [(E3, E4) and] ESTEP"  
+ * ensures arithmetic expression all follow positive-linear rules
+ * Checks cond 5,6 and 8
+ * Evaluates s3 simplicity in elseStep for interpreter
+ */
 void Step():
 {
     Token name;
@@ -617,7 +643,10 @@ void Step():
 
 }
 
-//Parses conditions and returns class ConditionInfo
+/**
+ * Parses conditions of the form ID<NUM
+ * @return ConditionInfo with threshold val and param name
+ */
 ConditionInfo Cond():{
     Token condIDTok;
     Token numTok;
@@ -630,7 +659,10 @@ ConditionInfo Cond():{
     }
 }
 
-//Parses the run section
+//
+/** Parses the run section
+ * Records starting stepname, intial x and y coords for interpreter
+ */
 void Run() :
 {
     Token StepName;
@@ -647,8 +679,12 @@ void Run() :
         runY = Long.parseLong(n2Token.image);
     }
 }
-//Parse artihmetic expressions and returns ArithExpression
-// negatives allowed for false branch but not for tru
+
+/**
+ * Parser for artihmetic expressions
+ * @param allowsNegatives - true when parsing false-branch, false when parsing true-branched (subtraction means nonsimple)
+ * @return complete ArithExpression for the expression
+ */
 ArithExpression Expr(boolean allowsNegatives):{
     ArithExpression exp = new ArithExpression();
     boolean termWasNumeral;
@@ -676,7 +712,12 @@ ArithExpression Expr(boolean allowsNegatives):{
         return exp;
     }
 }
-//Parses terms and returns boolean (factorWasNumeral) from Factor
+/**
+ * Parses terms and includes multiplication
+ * @param allowsNegatives passed to Factor
+ * @param exp the ArithExpression being built
+ * @return true if every factor is a numeral (got from Factor)
+ */
 boolean Term(boolean allowsNegatives, ArithExpression exp):{
     boolean factorWasNumeral;
 }
@@ -694,7 +735,14 @@ boolean Term(boolean allowsNegatives, ArithExpression exp):{
     }
     
 }
-//Parses factors - returns true if parsed factor is a numeral - validates rule s2
+//Parses factors - 
+/**
+ * Parser for a single factor: numeral, parameter identifier, of a sub-expr with parentheses
+ * @param allowsNegatives - can be passed to an expr being built
+ * @param exp the ArithExpression being built
+ * @return true if parsed factor is a numeral - false if indentifer or pexpr in parentheses
+ * @throws ParseException if undeclared identifier used
+ */
 boolean Factor(boolean allowsNegatives, ArithExpression exp):
 {
     Token numeralToken;
