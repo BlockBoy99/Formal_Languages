@@ -1,2 +1,2 @@
 Countdown: if x<10 (x,y) halt else (x-10,y) and Countdown;
-run Countdown (2025, 0)
+run Countdown2 (2025, 0)

@@ -6,21 +6,33 @@ PARSER_BEGIN(TPTP)
 import java.util.*;
 import java.util.HashSet;
 
+/**
+ * Helper class that stores a step's condition of form ID<NUM
+ * Tracks which parameter is used and the upper bound - useful for S3 checking
+ */
 class ConditionInfo{
-    public String identifier;  // which parameter (ID1 or ID2)
-    public long threshold;       // the NUM value
+    public String identifier;  // parameter used (ID1 or ID2)
+    public long threshold;       // the NUM value - upper bound
     
+    /**Constructor */
     public ConditionInfo(String id, long thresh) {
         this.identifier = id;
         this.threshold = thresh;
     }
 }
+
+/**
+ * Stores a linear Arithmetic expression
+ * Expressions are positive linear so can just store coefficients for num values
+ * And the idCounts for each id
+ * Evaluates expression in O(1)
+ */
 class ArithExpression {
     public long numSum; // sum of all individual constant terms
     public long id1Count; // coefficient of ID1
     public long id2Count; // coefficient of ID2
     
-
+    /**Constructor */
     public ArithExpression(){
         this.numSum = 0;
         this.id1Count = 0;
@@ -32,14 +44,18 @@ class ArithExpression {
         return numSum + (ID1 * id1Count) + (ID2 * id2Count);
     }
 
-    //merge another ArithExpression with this one - used for expressions like x+(1+y)
+    //merge two nested ArithExpressions - i.e. x+(1+y) into a single expression
     public void merge(ArithExpression other){
         this.numSum += other.numSum;
         this.id1Count += other.id1Count;
         this.id2Count += other.id2Count;
     }
-    //S3 checker, for when x<d is false - expression must be nonneg when cond is false
-    // expr is smallest at x=d as x>=d. Set other ID to 0 and check non-neg
+
+    /**
+     * Verifies S3 rule for simplicity
+     * When x<d is false - expression must be non-neg when cond is false
+     * expr is smallest at x=d as x>=d. Set other ID to 0 and check non-neg
+     */
     public boolean checkS3(boolean condUsesID1, long condThreshold){
         long result, ID1, ID2;
 
@@ -55,11 +71,17 @@ class ArithExpression {
         return (result >= 0);
     }
 }
+
+/**
+ * Represents the state of robot at a specific time during execution
+ * Stores names, coords and wether robot has halted
+ */
 class State {
     String stepName;
     long x, y;
     boolean halted;
 
+    /**Constructor */
     public State(String stepName, long x, long y) {
         this.stepName = stepName;
         this.x = x;
@@ -67,45 +89,55 @@ class State {
         this.halted = false;
     }
 
+    //checks if two states are equal - automatically yes if both halted
+    //used by Floyd's Cycle Detection Algorithm
     public boolean equals(State other) {
         if (this.halted && other.halted) return true;
         return this.stepName.equals(other.stepName) && this.x == other.x && this.y == other.y && this.halted == other.halted;
     }
 }
+
+/**
+ * Stores a single step instruction in its long form
+ */
 class StepDef {
     public String name;
-    public boolean condUsesID1;
-    public long condThreshold;
+    public boolean condUsesID1; //true if condition checks ID1 and is false otherwise
+    public long condThreshold;  //upper numeral bound of condition
+    
+    //True branch expression and specified target step
     public ArithExpression e1, e2;
     public String nextStepTrue;
+
+    //False branch expression and specified target step
     public ArithExpression e3, e4;
     public String nextStepFalse;
 }
 
 public class TPTP {
-    //vars for steps
+    //Tracking variables for defined steps and parameters - used for checking rules
     private static Set<String> stepNames=new HashSet<String>(); //store step names
     private static Set<String> parameterNames=new HashSet<String>(); // stores param names
     private static Map<String, StepDef> stepDefs = new HashMap<String, StepDef>(); //used for interpreter
     private static Set<String> stepReferencesAndNames = new HashSet<String>(); // tracks defined steps and referenced steps
 
-    //vars for runtime
+    //Setup variables for runtime
     private static String runStepName = null;
     private static int runStepLine = 1;
     private static long runX = 0;
     private static long runY = 0;
 
-    //vars for parsing context
+    //Variables for parsing context
     private static long lastNumeral = 0;
     private static String currentID1 = null;
     private static String currentID2 = null;
     private static String currentStepName=null;
 
-    //simplicity tracking
+    //Simplicity tracking
     private static boolean nonSimple = false;
     private static String firstNonSimpleStep=null;
 
-    //vars for loops
+    //Constants for bounding execution in edge cases
     private static final long MAX_COORDINATE = 1000000000L;// max coordinate for interpreter
     private static final String LOOP_DETECTED_STEP = "LOOP_DETECTED";
     
@@ -136,6 +168,7 @@ public class TPTP {
         }
         parameterNames.add(name);
     }
+
     /**
      * Attempts to create specific error messages by decoding expectedTokenSequences
      * @param e ParseException thrown by parser
@@ -164,11 +197,13 @@ public class TPTP {
         boolean expectsSEMICOLON = false;
         boolean expectsLPAREN = false;
         
+        //loop through JavaCC expected tokens
         if (e.expectedTokenSequences != null && tokenImage != null) {
             for (int[] seq : e.expectedTokenSequences) {
-                for (int kind : seq) {
-                    if (kind >= 0 && kind < tokenImage.length) {
-                        String img = tokenImage[kind];
+                for (int tokenKind : seq) { //loop through tokeKinds - unique integer IDs assigned to specific token types
+                    if (tokenKind >= 0 && tokenKind < tokenImage.length) {
+                        String img = tokenImage[tokenKind]; //get readable name
+                        //checks which token the parser was expecting
                         if ("\"<\"".equals(img)) expectsLT = true;
                         if ("<EOF>".equals(img)) expectsEOF = true;
                         if ("<IDENTIFIER>".equals(img)) expectsIDENTIFIER = true;
@@ -196,7 +231,7 @@ public class TPTP {
 
         //Arithmetric operation in condition - breaks rule of ID<NUM
         if (expectsLT && ("+".equals(encountered) || "-".equals(encountered) || "*".equals(encountered))) {
-            return "Condition is not of the form ID<NUM; found arithmetic operation: '"+encountered+"''.";
+            return "Condition is not of the form ID<NUM; found arithmetic operation: '"+encountered+"'.";
         }
         
         //parentheses surrounding condition
@@ -218,7 +253,7 @@ public class TPTP {
             return "Unexpected end of file. Expected semicolon after step definition.";
         }
 
-        // no comma beteen paramters
+        // no comma beteen parameters
         if (expectsIDENTIFIER && ",".equals(currentImg) && !encountered.equals(",")) {
             return "Expected comma separating parameters in step definition.";
         }
@@ -226,14 +261,15 @@ public class TPTP {
         // try and reconstruct a meaningful error
         StringBuilder expectedStr = new StringBuilder();
         if (e.expectedTokenSequences != null && tokenImage != null) {
-            for (int i = 0; i < e.expectedTokenSequences.length; i++) {
-                for (int j = 0; j < e.expectedTokenSequences[i].length; j++) {
-                    int kind = e.expectedTokenSequences[i][j];
+            for(int[] seq: e.expectedTokenSequences){
+                for(int kind: seq){
                     if (kind >= 0 && kind < tokenImage.length) {
+                        //strip surrounding qoutes of literal token
                         String exp = tokenImage[kind];
                         if (exp.startsWith("\"") && exp.endsWith("\"")) {
                             exp = exp.substring(1, exp.length() - 1);
                         }
+                        //avoid duplicates - will return -1 if not present
                         if (expectedStr.indexOf(exp) == -1) {
                             expectedStr.append(exp).append(" ");
                         }
@@ -249,15 +285,25 @@ public class TPTP {
         return "Syntax error: unexpected token '" + encountered + "'. Expected one of: " + exp + ".";
     }
     
+    /**
+     * Entry point to TPTP parser
+     * Reads and attempts to parse program from input
+     * If it is simple, it interprets it - otherwise output the first non-simple step
+     * Prints detailed structured errors on failure of form: 
+     * Line number and error message on next line
+     */
     public static void main( String[] args ) throws ParseException {
+        //Initialise parser
         TPTP parser = new TPTP( System.in ) ;
         try{
             parser.Program(); 
             System.out.println("Success");
             if(nonSimple){
+                //Program contains a non-simple step
                 System.out.println("Non-simple");
                 System.out.println(firstNonSimpleStep);
             }else{
+                //Program is simple - execute it
                 System.out.println("Simple");
                 executeInterpreter();
             }
@@ -265,7 +311,7 @@ public class TPTP {
         catch(ParseException e){
             System.out.println("Failure");
             if (e.currentToken == null) {
-                // A custom ParseException where we prefix line number inside the message
+                // A custom ParseException where line number is prefixed before a | in message
                 String msg = e.getMessage();
                 if (msg != null && msg.contains("|")) {
                     int pipeIdx = msg.indexOf('|');
@@ -273,25 +319,28 @@ public class TPTP {
                     System.err.println(lineStr);
                     System.err.println(msg.substring(pipeIdx + 1));
                 } else {
+                    //no pipe seperator - default to line 1
                     System.err.println("1");
                     System.err.println(msg != null ? msg : "Unknown syntax error");
                 }
             } else {
-                // An auto-generated JavaCC parse error - make our own
+                // Auto-generated JavaCC parse error - get token line num
                 Token errorToken = e.currentToken.next;
                 if (errorToken != null) {
                     System.err.println(errorToken.beginLine); 
                 } else {
-                    System.err.println("1");
+                    System.err.println("1"); // no error token - default to line 1
                 }
-                System.err.println(decodeMessage(e));
+                System.err.println(decodeMessage(e)); //convert from raw JavaCC error to human-interpretable on
             }
         }
         catch(TokenMgrError e){
+            //lexical error
             System.out.println("Failure");
             String msg = e.getMessage();
-            int lineNum = 1;
+            int lineNum = 1; //default
             try {
+                //get line number
                 int lineIdx = msg.indexOf("line ");
                 if (lineIdx != -1) {
                     int commaIdx = msg.indexOf(",", lineIdx);
@@ -300,17 +349,19 @@ public class TPTP {
                     }
                 }
             } catch (Exception ex) {
-                lineNum = 1;
+                lineNum = 1; 
             }
             System.err.println(lineNum);
             System.err.println("Lexical error: " + msg);
         } 
         catch (Exception e){
+            //catch-all for runtime errors
             System.out.println("Failure");
             System.err.println("1");
             System.err.println("Internal error: "+e.getMessage());
         }
     }
+    
     //
     /**
      * Marks current step as non-simple - if not done before previously
@@ -358,7 +409,8 @@ public class TPTP {
         String nextStep = condTrue ? def.nextStepTrue : def.nextStepFalse;
 
         //Loop acceleration - took me a while
-        // if step loops to istelf, skip ahead nathematically
+        //if step loops to istelf, skip ahead nathematically
+        //prevents taking too long on large loops - extra challenge
 
         if (nextStep.equals(current.stepName)) {
             //detect simple update patterns i.e x+constant or y+constant or constants like (x,constant)
@@ -374,18 +426,27 @@ public class TPTP {
                 long dy = yIdentity ? ex2.numSum : 0;
                 
                 if (def.condUsesID1 && dx == 0) {
-                    // Condition checks x but x never changes
-                    //infinite loop
-                    State loopState = new State(LOOP_DETECTED_STEP, -1, -1);
-                    loopState.halted = true;
-                    return loopState;
+                    if (xIdentity || current.x == ex1.numSum) { 
+                        // Condition checks x but x never changes
+                        //infinite loop
+                        State loopState = new State(LOOP_DETECTED_STEP, -1, -1);
+                        loopState.halted = true;
+                        return loopState;
+                    } else {
+                        canAccelerate = false;
+                    }
+                    
                 }
                 if (!def.condUsesID1 && dy == 0) {
-                    // Condition checks y but y never changes
-                    //infinite loop
-                    State loopState = new State(LOOP_DETECTED_STEP, -1, -1);
-                    loopState.halted = true;
-                    return loopState;
+                    if (yIdentity || current.y == ex2.numSum) { 
+                        // Condition checks y but y never changes
+                        //infinite loop
+                        State loopState = new State(LOOP_DETECTED_STEP, -1, -1);
+                        loopState.halted = true;
+                        return loopState;
+                    } else {
+                        canAccelerate = false;
+                    }
                 }
 
                 if (condTrue) {

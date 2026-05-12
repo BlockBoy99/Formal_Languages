@@ -1,0 +1,4 @@
+Co_untdown: if x<10 (x,y) halt else (x-10,y) and Countdown;
+Count1down: if x<10 (x,y) halt else (x-10,y) and Countdown;
+C-unt1down: if x<10 (x,y) halt else (x-10,y) and Countdown;
+run Countdown (2025, 0)

@@ -1,0 +1,2 @@
+Countup: if x<10 (x, y) becomes (x + x + 1,y) and Countup else (x + 1,y) and Countup;
+run Countup (0, 0)
